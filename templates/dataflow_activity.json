@@ -1,0 +1,35 @@
+{
+  "name": "dataflow_activity_template",
+  "properties": {
+    "description": "Template: Execute a mapping data flow",
+    "activities": [
+      {
+        "name": "DataTransformation",
+        "type": "ExecuteDataFlow",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "1.00:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 60
+        },
+        "typeProperties": {
+          "dataflow": {
+            "referenceName": "DATAFLOW_NAME",
+            "type": "DataFlowReference"
+          },
+          "compute": {
+            "coreCount": 8,
+            "computeType": "General"
+          },
+          "traceLevel": "Fine"
+        }
+      }
+    ],
+    "parameters": {
+      "inputPath": { "type": "String", "defaultValue": "" },
+      "outputPath": { "type": "String", "defaultValue": "" }
+    },
+    "annotations": ["template", "dataflow-pipeline"],
+    "folder": { "name": "generated" }
+  }
+}

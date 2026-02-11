@@ -1,0 +1,46 @@
+{
+  "version": "1.0",
+  "description": "Best practices rules for ADF pipeline review",
+  "rules": {
+    "retry_policy": {
+      "description": "All non-trivial activities should have retry policies",
+      "min_retry": 1,
+      "max_retry": 5,
+      "recommended_retry": 3,
+      "exempt_types": ["Wait", "SetVariable", "AppendVariable", "IfCondition", "ForEach", "Switch"]
+    },
+    "timeout": {
+      "description": "All activities should have explicit timeouts",
+      "default_timeout": "0.12:00:00",
+      "max_timeout": "7.00:00:00"
+    },
+    "naming": {
+      "description": "Naming conventions for pipelines and activities",
+      "pipeline_prefix_pattern": "^[A-Za-z]",
+      "max_name_length": 120,
+      "require_unique_activity_names": true
+    },
+    "parameterization": {
+      "description": "Environment-specific values should be parameterized",
+      "hardcoded_patterns_to_flag": [
+        ".blob.core.windows.net",
+        ".database.windows.net",
+        "Server=",
+        "Initial Catalog=",
+        "C:\\\\"
+      ]
+    },
+    "security": {
+      "description": "Security best practices",
+      "flag_plaintext_secrets": true,
+      "recommend_secure_io": ["Copy", "WebActivity", "AzureFunctionActivity"],
+      "secret_keywords": ["password", "secret", "apikey", "api_key", "access_key", "token"]
+    },
+    "organization": {
+      "description": "Pipeline organization best practices",
+      "require_description": true,
+      "require_annotations": false,
+      "require_folder": true
+    }
+  }
+}
