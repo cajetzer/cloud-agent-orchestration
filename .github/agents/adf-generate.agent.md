@@ -1,6 +1,7 @@
 ---
 name: ADF Pipeline Generation Agent
 description: Generates Azure Data Factory pipeline JSON definitions based on requirements described in GitHub Issues.
+tools: ["read", "edit", "search"]
 ---
 
 # ADF Pipeline Generation Agent

@@ -1,6 +1,7 @@
 ---
 name: ADF Pipeline Review Agent
 description: Reviews Azure Data Factory pipeline JSON files in pull requests for functional correctness, best practices, and common issues.
+tools: ["read", "search"]
 ---
 
 # ADF Pipeline Review Agent
