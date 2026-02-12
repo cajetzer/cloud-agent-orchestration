@@ -8,18 +8,29 @@ The ADF Pipeline Generation Agent attempted to create the pipeline file in the `
 
 The generated pipeline `blob_to_sql_sales_copy.json` has been created in the repository root directory.
 
-## Required Action
+## Quick Fix
 
-The `pipelines/` directory needs to be created, and the pipeline file should be moved there:
+Run the provided setup script:
+
+```bash
+chmod +x setup-pipeline.sh
+./setup-pipeline.sh
+```
+
+This will:
+1. Create the `pipelines/` directory
+2. Move the pipeline file to the correct location
+3. Clean up this note
+
+## Manual Setup (Alternative)
+
+If you prefer to set up manually:
 
 ```bash
 mkdir -p pipelines
 mv blob_to_sql_sales_copy.json pipelines/
+rm PIPELINE_SETUP_NOTE.md setup-pipeline.sh
 ```
-
-## Alternative Solution
-
-If bash access can be provided to the agent (e.g., through GitHub Actions or a setup script), the agent could create the directory structure automatically in future runs.
 
 ## Generated Pipeline
 
