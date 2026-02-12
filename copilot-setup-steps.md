@@ -17,18 +17,24 @@ No dependencies to install. This repository contains only markdown agent definit
 
 ## Workflow Automation
 
-The repository uses **hybrid automation combining GitHub Actions with manual Copilot Workspace triggers**:
+The repository uses **fully automated agent orchestration via GitHub Actions and GraphQL API**:
 
-- **Issue labeled `adf-generate`** → `assign-adf-generate-agent.yml` → Posts instructions → **User opens in Workspace** → Selects "adf-generate" agent → Agent starts working
-- **PR labeled `adf-pipeline`** → `assign-adf-review-agent.yml` → Posts instructions → **User opens PR in Workspace** → Selects "adf-review" agent → Agent reviews
-- **Review with errors** → `handle-adf-review-results.yml` → Posts fix instructions → **User re-opens in Workspace** → Selects "adf-generate" → Fix cycle continues
+- **Issue labeled `adf-generate`** → Workflow calls GraphQL API → Copilot assigned with `customAgent: "adf-generate"` → Agent starts automatically
+- **PR labeled `adf-pipeline`** → Workflow calls GraphQL API → Copilot assigned with `customAgent: "adf-review"` → Agent reviews automatically  
+- **Review with errors** → Workflow parses results → GraphQL API re-assigns Copilot with `customAgent: "adf-generate"` → Fix cycle continues
 - **Retry count >= 3** → `escalate-to-human-review.yml` → Escalates to human review
 
-Workflows provide orchestration logic (state tracking, routing, escalation) while Copilot Workspace provides execution. This teaches users the complete Copilot workflow including both automation and agent capabilities.
+## Required Setup
+
+For fully automated agent assignment, the repository needs a Personal Access Token (PAT):
+
+1. Create a fine-grained PAT at https://github.com/settings/tokens?type=beta
+2. Grant permissions: Contents (read/write), Issues (read/write), Pull requests (read/write)
+3. Add as repository secret named `COPILOT_PAT`
+
+Without the PAT, workflows will still run but cannot automatically assign Copilot. They will post instructions for manual Workspace triggering instead.
 
 ## Working with Pipelines
 
 Generated pipelines should be committed to a `pipelines/` directory as JSON files.
 Pipeline JSON must follow the Azure Data Factory ARM template schema.
-
-
