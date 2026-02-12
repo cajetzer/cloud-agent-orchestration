@@ -91,6 +91,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NODE_ID: ${{ github.event.pull_request.node_id }}
+          REPO_NODE_ID: ${{ github.event.repository.node_id }}
         run: |
           # Get Copilot bot user ID first
           COPILOT_ID=$(gh api graphql -f query='
@@ -108,14 +109,20 @@ jobs:
           
           echo "Copilot ID: $COPILOT_ID"
           
-          # Assign Copilot as reviewer with custom agent
+          # Assign Copilot as reviewer with custom agent using agentAssignment
           gh api graphql \
             -H 'GraphQL-Features: issues_copilot_assignment_api_support,coding_agent_model_selection' \
             -f query='
-            mutation($prId: ID!, $actorIds: [ID!]!) {
+            mutation($prId: ID!, $actorIds: [ID!]!, $repoId: ID!) {
               addAssigneesToAssignable(input: {
                 assignableId: $prId,
-                assigneeIds: $actorIds
+                assigneeIds: $actorIds,
+                agentAssignment: {
+                  targetRepositoryId: $repoId,
+                  baseRef: "main",
+                  customAgent: "adf-review",
+                  customInstructions: "Review the ADF pipeline JSON for correctness, best practices, and security. Post findings as a comment."
+                }
               }) {
                 assignable {
                   ... on PullRequest {
@@ -127,7 +134,8 @@ jobs:
               }
             }' \
             -f prId="$PR_NODE_ID" \
-            -f actorIds="[$COPILOT_ID]" || {
+            -f actorIds="[\"$COPILOT_ID\"]" \
+            -f repoId="$REPO_NODE_ID" || {
               echo "GraphQL assignment failed. Manual workspace trigger required."
               exit 0
             }

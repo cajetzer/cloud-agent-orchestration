@@ -152,14 +152,20 @@ jobs:
           
           echo "Re-assigning Copilot to fix pipeline errors..."
           
-          # Re-assign Copilot to the PR to trigger fix cycle
+          # Re-assign Copilot with adf-generate agent to fix errors
           gh api graphql \
             -H 'GraphQL-Features: issues_copilot_assignment_api_support,coding_agent_model_selection' \
             -f query='
-            mutation($prId: ID!, $actorIds: [ID!]!) {
+            mutation($prId: ID!, $actorIds: [ID!]!, $repoId: ID!) {
               addAssigneesToAssignable(input: {
                 assignableId: $prId,
-                assigneeIds: $actorIds
+                assigneeIds: $actorIds,
+                agentAssignment: {
+                  targetRepositoryId: $repoId,
+                  baseRef: "main",
+                  customAgent: "adf-generate",
+                  customInstructions: "Fix the ADF pipeline errors identified in the review comment. Update the pipeline JSON to address all errors, then push to this branch."
+                }
               }) {
                 assignable {
                   ... on PullRequest {
@@ -171,7 +177,8 @@ jobs:
               }
             }' \
             -f prId="$PR_NODE_ID" \
-            -f actorIds="[$COPILOT_ID]" || {
+            -f actorIds="[\"$COPILOT_ID\"]" \
+            -f repoId="$REPO_NODE_ID" || {
               echo "GraphQL re-assignment failed. Manual trigger required for fix cycle."
               exit 0
             }
