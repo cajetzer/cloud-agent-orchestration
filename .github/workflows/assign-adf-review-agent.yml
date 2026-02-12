@@ -4,6 +4,10 @@ on:
   pull_request_target:
     types: [opened, labeled, synchronize]
 
+concurrency:
+  group: adf-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   pull-requests: write
   issues: write
