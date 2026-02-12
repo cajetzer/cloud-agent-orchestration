@@ -145,6 +145,8 @@ The repository includes four GitHub Actions workflows that orchestrate this flow
 | **Review Handoff** | `.github/workflows/handle-adf-review-results.yml` | Parses review comment → Routes back to generation agent (if errors) or approves |
 | **Escalation** | `.github/workflows/escalate-to-human-review.yml` | After 3 cycles → Adds `needs-human-review` label and alerts maintainers |
 
+> **Note:** Assignment workflows use `concurrency` groups to prevent duplicate agent sessions when multiple events fire simultaneously (e.g., issue created with label already applied).
+
 ### How Automatic Assignment Works
 
 The workflows use the GitHub GraphQL API with the `agentAssignment` input to assign Copilot with a specific custom agent:

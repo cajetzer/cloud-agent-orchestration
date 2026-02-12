@@ -4,6 +4,10 @@ on:
   issues:
     types: [labeled, opened]
 
+concurrency:
+  group: adf-generate-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
 permissions:
   issues: write
   contents: write
