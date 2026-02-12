@@ -32,6 +32,15 @@ mv blob_to_sql_sales_copy.json pipelines/
 rm PIPELINE_SETUP_NOTE.md setup-pipeline.sh
 ```
 
+## Next Steps for Review Workflow
+
+After running the setup script:
+
+1. **Add the `adf-pipeline` label to this PR** - This triggers the ADF Review Agent workflow
+2. The review agent will automatically analyze the pipeline
+3. Review feedback will be posted as a comment
+4. Any issues will be fixed in subsequent commits
+
 ## Generated Pipeline
 
 The pipeline has been successfully generated and includes all required components:
