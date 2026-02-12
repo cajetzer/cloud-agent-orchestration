@@ -1,4 +1,4 @@
-# ADF Agent Orchestration
+# GitHub Copilot (cloud) Coding Agent Orchestration
 
 A **learning and testing repository** demonstrating how to orchestrate GitHub Copilot Coding Agent custom agents with automated handoffs using GitHub Actions workflows and the GraphQL API.
 
@@ -31,7 +31,7 @@ Two custom agents for Azure Data Factory pipeline development — defined entire
 - **When to activate** — What types of issues/PRs the agent handles
 - **What to do** — Step-by-step instructions for the agent
 - **What tools to use** — Templates, rules, and reference files
-- **How to hand off** — When to pass work to another agent or human
+- **How to hand off** — When to pass work to another agent or human (not yet supported in cloud agents at publish time)
 
 ```markdown
 # Example: .github/agents/my-agent.agent.md
@@ -50,22 +50,23 @@ description: Does a specific task
 
 ### How Does Agent Assignment Work?
 
-There are two ways to assign Copilot to an issue:
+At the time of this publish, there are two ways to assign Copilot (cloud) Coding Agent to an issue:
 
-1. **Manual (UI):** Assign Copilot to an issue, then select a custom agent when it starts
+1. **Manual (UI):** Assign Copilot to an issue, then select a custom agent when starting
 2. **Automatic (API):** GitHub Actions workflow calls GraphQL API with `agentAssignment`
 
-This repository demonstrates **automatic assignment** — see [How Automatic Assignment Works](#how-automatic-assignment-works) for the GraphQL details.
+This repository demonstrates **automatic assignment** as doable at this time — see [How Automatic Assignment Works](#how-automatic-assignment-works) for the GraphQL details.
 
 > 📖 **Learn more:** [GitHub GraphQL API](https://docs.github.com/en/graphql)
 
 ### Why Use Workflows for Orchestration?
 
-Custom agents alone can't automatically:
+Custom agents for the cloud Coding Agent alone cannot yet automatically:
 - Detect when they should start working
-- Hand off work to other agents
+- Hand off work to other agents cloud agents
 - Track state across multiple interactions
 - Enforce retry limits or escalation policies
+**Note: Many of these are available in local IDE agents, but not yet in the cloud agent.**
 
 **GitHub Actions workflows** fill this gap by:
 - Triggering on events (labels, PR creation, comments)
@@ -77,8 +78,8 @@ This creates a **complete orchestration system** where multiple agents can work 
 
 ---
 
-## Quick Start (5 minutes)
-
+## Quick Start (15 minutes)
+See [Detailed Setup Instructions](#detailed-setup-instructions) below for step-by-step guidance.
 1. **Fork or clone** this repository to your GitHub org
 2. **Enable Copilot Coding Agent** in your org/repo settings
 3. **Create labels** (see [Step 3](#step-3-create-required-labels))
@@ -123,7 +124,7 @@ Issue created + labeled "adf-generate"
 
 ## How Agent Orchestration Works
 
-The custom agents are **automatically assigned** by GitHub Actions workflows using the GraphQL API with `agentAssignment` parameters. This enables fully automated orchestration:
+In this example, the custom agents are **automatically assigned** by GitHub Actions workflows using the GraphQL API with `agentAssignment` parameters. This enables fully automated orchestration:
 
 1. **Detect** when an issue needs ADF pipeline generation (labeled `adf-generate`)
 2. **Assign** Copilot with the specific custom agent via GraphQL API
@@ -225,6 +226,7 @@ git push -u origin main
 2. Enable **Copilot coding agent** for the organization (or for selected repositories).
 3. In your **repository settings** → **General** → **Features**, confirm that **Issues** and **Pull Requests** are enabled.
 4. Under **Settings → Copilot → Coding agent**, ensure the repo is opted in.
+5. Go to **Settings → Actions → General**, scroll to **"Fork pull request workflows from outside collaborators"**, and select **"Require approval for first-time contributors who are new to GitHub"** (the most permissive option). This allows Copilot-opened PRs to automatically trigger workflows like the review agent assignment without requiring manual approval.
 
 > **Note:** Copilot Coding Agent is available with GitHub Copilot Enterprise and GitHub Copilot Business plans. Confirm your plan has access to this feature.
 
