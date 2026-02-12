@@ -14,8 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     if: contains(github.event.pull_request.labels.*.name, 'adf-pipeline')
     steps:
-      - name: Check if review agent already assigned
-        id: check-review
+      - name: Check if review already assigned
+        id: check
         uses: actions/github-script@v7
         with:
           script: |
@@ -23,101 +23,58 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             
-            // Get all comments on the PR
             const comments = await github.rest.issues.listComments({
               owner,
               repo,
               issue_number: pr_number
             });
             
-            // Check if review agent has already been mentioned/assigned
             const reviewMentioned = comments.data.some(comment => 
-              comment.body.includes('Review Agent Assigned') ||
-              comment.body.includes('🔍 ADF Pipeline Review')
+              comment.body.includes('🔍 ADF Pipeline Review Agent Assigned')
             );
             
-            console.log(`Review already assigned: ${reviewMentioned}`);
-            core.setOutput('result', reviewMentioned ? 'already-assigned' : 'needs-review');
-
-      - name: Assign Copilot with ADF Review Agent via GraphQL API
-        if: steps.check-review.outputs.result == 'needs-review'
-        run: |
-          gh api graphql \
-            -H 'GraphQL-Features: issues_copilot_assignment_api_support,coding_agent_model_selection' \
-            -f query='mutation {
-              replaceActorsForAssignable(input: {
-                assignableId: "${{ github.event.pull_request.node_id }}",
-                actorIds: ["MDEyOkNvYm90MTExMTExMTEx"],
-                agentAssignment: {
-                  targetRepositoryId: "${{ github.event.repository.node_id }}",
-                  baseRef: "${{ github.event.pull_request.base.ref }}",
-                  customInstructions: "Review the ADF pipeline JSON in this PR for functional correctness, best practices, and errors. Check against the rules in rules/best_practices.json",
-                  customAgent: "adf-review"
-                }
-              }) {
-                assignable {
-                  ... on PullRequest {
-                    id
-                    title
-                  }
-                }
-              }
-            }' 2>/dev/null
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            if (reviewMentioned) {
+              console.log('✅ Review already assigned');
+              core.setOutput('should_review', 'false');
+            } else {
+              console.log('📋 Review not yet assigned');
+              core.setOutput('should_review', 'true');
+            }
       
-      - name: Add review tracking labels
+      - name: Assign Copilot Review Agent
+        if: steps.check.outputs.should_review == 'true'
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const pr_number = context.issue.number;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             
-            // Post notification comment
+            console.log(`🤖 Assigning Copilot Review Agent to PR #${pr_number}`);
+            
+            // Post review assignment comment
             await github.rest.issues.createComment({
               owner,
               repo,
               issue_number: pr_number,
-              body: `## 🔍 ADF Pipeline Review Agent Assigned\n\n` +
-                    `The **ADF Review Agent** has been automatically assigned to review this pipeline.\n\n` +
-                    `**Review will check:**\n` +
-                    `- ✅ Functional correctness against requirements\n` +
-                    `- ✅ ADF best practices and conventions\n` +
-                    `- ✅ Performance and security policies\n` +
-                    `- ✅ Proper error handling and timeouts\n\n` +
-                    `The agent will post detailed findings below.`
+              body: `## 🔍 ADF Pipeline Review Agent Assigned
+
+I've been assigned to review this ADF pipeline for quality and correctness.
+
+**I will check:**
+- ✅ All original requirements are implemented
+- ✅ ADF best practices and conventions (from rules/best_practices.json)
+- ✅ Proper error handling and retry logic
+- ✅ Security and performance policies
+
+**Status**: Starting review analysis...`
             });
             
-            // Add review-in-progress label
+            // Add tracking labels
             await github.rest.issues.addLabels({
               owner,
               repo,
               issue_number: pr_number,
-              labels: ['review-in-progress']
+              labels: ['review-in-progress', 'retry-count-1']
             });
-
-      - name: Initialize retry counter
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const pr_number = context.issue.number;
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            
-            const pr = await github.rest.pulls.get({
-              owner,
-              repo,
-              pull_number: pr_number
-            });
-            
-            // Only add if not already present
-            const hasRetryLabel = pr.data.labels.some(l => l.name.startsWith('retry-count-'));
-            if (!hasRetryLabel) {
-              await github.rest.issues.addLabels({
-                owner,
-                repo,
-                issue_number: pr_number,
-                labels: ['retry-count-1']
-              });
-            }

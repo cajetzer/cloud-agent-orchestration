@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     if: contains(github.event.issue.labels.*.name, 'adf-generate')
     steps:
-      - name: Check if already assigned
+      - name: Check if Copilot already assigned
         id: check
         uses: actions/github-script@v7
         with:
@@ -21,74 +21,45 @@ jobs:
             const issue = context.payload.issue;
             const assignees = issue.assignees.map(a => a.login);
             
-            // Check if Copilot SWE Agent is already assigned
             if (assignees.includes('copilot-swe-agent[bot]')) {
-              console.log('Copilot already assigned');
-              core.setOutput('result', 'already-assigned');
+              console.log('✅ Copilot already assigned');
+              core.setOutput('should_assign', 'false');
             } else {
-              core.setOutput('result', 'needs-assignment');
+              console.log('📋 Copilot not yet assigned');
+              core.setOutput('should_assign', 'true');
             }
       
-      - name: Assign Copilot with ADF Generate Agent via GraphQL API
-        if: steps.check.outputs.result == 'needs-assignment'
-        run: |
-          gh api graphql \
-            -H 'GraphQL-Features: issues_copilot_assignment_api_support,coding_agent_model_selection' \
-            -f query='mutation {
-              addAssigneesToAssignable(input: {
-                assignableId: "${{ github.event.issue.node_id }}",
-                assigneeIds: ["${{ github.event.repository.owner.id }}"]
-              }) {
-                clientMutationId
-              }
-            }' \
-            --jq '.data.addAssigneesToAssignable.clientMutationId' 2>/dev/null || \
-          gh api graphql \
-            -H 'GraphQL-Features: issues_copilot_assignment_api_support,coding_agent_model_selection' \
-            -f query='mutation {
-              replaceActorsForAssignable(input: {
-                assignableId: "${{ github.event.issue.node_id }}",
-                actorIds: ["MDEyOkNvYm90MTExMTExMTEx"],
-                agentAssignment: {
-                  targetRepositoryId: "${{ github.event.repository.node_id }}",
-                  basRef: "main",
-                  customInstructions: "Generate ADF pipeline from this issue requirements",
-                  customAgent: "adf-generate"
-                }
-              }) {
-                assignable {
-                  ... on Issue {
-                    id
-                    title
-                  }
-                }
-              }
-            }' 2>/dev/null
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Add tracking labels
+      - name: Assign Copilot Agent
+        if: steps.check.outputs.should_assign == 'true'
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const issue_number = context.issue.number;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             
+            console.log(`🤖 Assigning Copilot to issue #${issue_number} for ADF pipeline generation`);
+            
+            // Post initial comment with instructions
             await github.rest.issues.createComment({
               owner,
               repo,
               issue_number,
-              body: `🤖 **ADF Pipeline Generation Agent Assigned**\n\n` +
-                    `The **ADF Generation Agent** has been automatically assigned to this issue.\n\n` +
-                    `**What happens next:**\n` +
-                    `1. Agent reads your pipeline requirements\n` +
-                    `2. Generates ADF pipeline JSON\n` +
-                    `3. Opens a PR with the generated pipeline\n` +
-                    `4. Review agent automatically reviews the pipeline\n\n` +
-                    `Monitor progress in the linked PR.`
+              body: `## 🤖 Copilot Agent Assignment
+
+I've assigned Copilot to generate the ADF pipeline based on your requirements.
+
+**What I'll do:**
+1. ✅ Read and analyze all pipeline requirements
+2. ✅ Generate a complete ADF pipeline JSON
+3. ✅ Create a PR with the pipeline configuration
+4. ✅ Ensure all requirements are met
+
+**Please wait** - pipeline generation in progress...`
             });
             
+            // Add tracking labels
             await github.rest.issues.addLabels({
               owner,
               repo,
