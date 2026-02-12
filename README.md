@@ -226,7 +226,6 @@ git push -u origin main
 2. Enable **Copilot coding agent** for the organization (or for selected repositories).
 3. In your **repository settings** → **General** → **Features**, confirm that **Issues** and **Pull Requests** are enabled.
 4. Under **Settings → Copilot → Coding agent**, ensure the repo is opted in.
-5. Go to **Settings → Actions → General**, scroll to **"Fork pull request workflows from outside collaborators"**, and select **"Require approval for first-time contributors who are new to GitHub"** (the most permissive option). This allows Copilot-opened PRs to automatically trigger workflows like the review agent assignment without requiring manual approval.
 
 > **Note:** Copilot Coding Agent is available with GitHub Copilot Enterprise and GitHub Copilot Business plans. Confirm your plan has access to this feature.
 
