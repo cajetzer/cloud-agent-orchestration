@@ -20,8 +20,9 @@ jobs:
             const issue = context.payload.issue;
             const assignees = issue.assignees.map(a => a.login);
             
-            // Check if Copilot is already assigned (username may vary)
-            if (assignees.some(a => a.includes('copilot'))) {
+            // Check if Copilot is already assigned (check known bot usernames)
+            const copilotBotNames = ['copilot', 'copilot[bot]', 'github-copilot[bot]', 'copilot-swe-agent[bot]'];
+            if (assignees.some(a => copilotBotNames.includes(a))) {
               console.log('Copilot already assigned');
               core.setOutput('already_assigned', 'true');
               return;
