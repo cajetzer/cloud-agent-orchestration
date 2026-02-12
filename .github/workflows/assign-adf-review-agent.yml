@@ -13,7 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     if: contains(github.event.pull_request.labels.*.name, 'adf-pipeline')
     steps:
-      - uses: actions/github-script@v7
+      - name: Check if review already in progress
+        id: check-review
+        uses: actions/github-script@v7
         with:
           script: |
             const pr_number = context.issue.number;
@@ -24,26 +26,111 @@ jobs:
             });
             
             const reviewed = comments.data.some(c => 
-              c.body.includes('ADF Pipeline Review Agent')
+              c.body.includes('🔍 ADF Pipeline Review Agent Assigned')
             );
             
             if (reviewed) {
               console.log('Review already assigned');
+              core.setOutput('already_reviewed', 'true');
               return;
             }
             
-            console.log('Assigning review agent');
+            core.setOutput('already_reviewed', 'false');
+      
+      - name: Get or initialize retry count
+        if: steps.check-review.outputs.already_reviewed == 'false'
+        id: retry-count
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const retryLabel = pr.labels.find(l => l.name.startsWith('retry-count-'))?.name;
+            const retryCount = retryLabel ? parseInt(retryLabel.match(/\d+/)[0]) : 1;
+            
+            console.log(`Current retry count: ${retryCount}`);
+            core.setOutput('count', retryCount.toString());
+      
+      - name: Post review assignment comment
+        if: steps.check-review.outputs.already_reviewed == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr_number = context.issue.number;
+            const retryCount = '${{ steps.retry-count.outputs.count }}';
             
             await github.rest.issues.createComment({
               issue_number: pr_number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: 'ADF Pipeline Review Agent Assigned - Starting review'
+              body: '🔍 **ADF Pipeline Review Agent Assigned**\n\n' +
+                    'The ADF Review Agent will check this pipeline for:\n' +
+                    '- Structural correctness\n' +
+                    '- Activity configuration\n' +
+                    '- Error handling policies\n' +
+                    '- Security best practices\n' +
+                    '- Naming conventions\n\n' +
+                    `_Review cycle: ${retryCount} of 3_\n\n` +
+                    '_Assigning Copilot with review agent..._'
             });
+            
+            // Add or update labels
+            const labels = ['review-in-progress'];
+            if (!retryCount || retryCount === '1') {
+              labels.push('retry-count-1');
+            }
             
             await github.rest.issues.addLabels({
               issue_number: pr_number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              labels: ['review-in-progress', 'retry-count-1']
+              labels: labels
             });
+      
+      - name: Assign Copilot with ADF Review Agent via GraphQL
+        if: steps.check-review.outputs.already_reviewed == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NODE_ID: ${{ github.event.pull_request.node_id }}
+          REPO_NODE_ID: ${{ github.event.repository.node_id }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          # Get Copilot bot user ID first
+          COPILOT_ID=$(gh api graphql -f query='
+          query {
+            user(login: "copilot") {
+              id
+            }
+          }' --jq '.data.user.id' 2>/dev/null || echo "")
+          
+          if [ -z "$COPILOT_ID" ]; then
+            echo "Warning: Could not retrieve Copilot bot ID. Skipping GraphQL assignment."
+            echo "You may need to manually open this PR in Copilot Workspace and select the adf-review agent."
+            exit 0
+          fi
+          
+          echo "Copilot ID: $COPILOT_ID"
+          
+          # Assign Copilot as reviewer with custom agent
+          gh api graphql \
+            -H 'GraphQL-Features: issues_copilot_assignment_api_support,coding_agent_model_selection' \
+            -f query='
+            mutation($prId: ID!, $actorIds: [ID!]!, $repoId: ID!) {
+              addAssigneesToAssignable(input: {
+                assignableId: $prId,
+                assigneeIds: $actorIds
+              }) {
+                assignable {
+                  ... on PullRequest {
+                    id
+                    title
+                    number
+                  }
+                }
+              }
+            }' \
+            -f prId="$PR_NODE_ID" \
+            -f actorIds="[$COPILOT_ID]" \
+            -f repoId="$REPO_NODE_ID" || {
+              echo "GraphQL assignment failed. Manual workspace trigger required."
+              exit 0
+            }

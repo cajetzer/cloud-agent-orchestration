@@ -13,19 +13,23 @@ Two **Copilot Coding Agent custom agents** for Azure Data Factory pipeline devel
 Issue created + labeled "adf-generate"
   │
   └─ Workflow: assign-adf-generate-agent.yml
+     │ (Posts comment, attempts Copilot assignment)
      │
-     └─ GraphQL API: Assign Copilot with customAgent: "adf-generate"
+     └─ User opens issue in Copilot Workspace
+        │ (Selects "adf-generate" agent from dropdown)
         │
-        └─ Copilot with ADF Generate Agent starts automatically
+        └─ Copilot with ADF Generate Agent works on issue
            ├─ Reads issue requirements
            ├─ Generates ADF pipeline JSON
            └─ Opens PR with label "adf-pipeline"
               │
               └─ Workflow: assign-adf-review-agent.yml triggers
+                 │ (Attempts to assign review agent)
                  │
-                 └─ GraphQL API: Assign Copilot with customAgent: "adf-review"
+                 └─ User opens PR in Copilot Workspace (optional)
+                    │ (Selects "adf-review" agent from dropdown)
                     │
-                    └─ Copilot with ADF Review Agent starts automatically
+                    └─ Copilot with ADF Review Agent reviews PR
                        ├─ Reviews pipeline for correctness & best practices
                        └─ Posts findings
                           │
@@ -34,8 +38,9 @@ Issue created + labeled "adf-generate"
                           ├─ ⚠️ Warnings only → Labels PR "approved-with-warnings"
                           │
                           └─ ❌ Errors found → Workflow: handle-adf-review-results.yml
+                             │ (Parses errors, posts instructions)
                              │
-                             └─ GraphQL API: Re-assign Copilot with customAgent: "adf-generate"
+                             └─ User re-opens PR in Workspace with "adf-generate"
                                 │
                                 └─ Copilot fixes issues, pushes to branch
                                    └─ Triggers review cycle again...
@@ -44,13 +49,13 @@ Issue created + labeled "adf-generate"
 
 ## How Agent Orchestration Works
 
-The custom agents alone **cannot automatically orchestrate** the generation → review → fix cycle. GitHub Actions workflows are required to:
+Custom agents must be **manually triggered** through GitHub Copilot Workspace UI. GitHub Actions workflows **facilitate** the orchestration by:
 
-1. **Detect** when an issue needs ADF pipeline generation (labeled `adf-generate`)
-2. **Trigger** the generation agent to create a PR
-3. **Monitor** for the PR and automatically request the review agent
-4. **Parse** review results and hand back to generation agent if issues found
-5. **Count** retry cycles and escalate to human review after 3 attempts
+1. **Detecting** when an issue needs ADF pipeline generation (labeled `adf-generate`)
+2. **Posting instructions** and attempting to assign Copilot to the issue
+3. **Monitoring** for the PR and attempting to assign the review agent
+4. **Parsing** review results and posting clear instructions for fix cycles
+5. **Counting** retry cycles and escalating to human review after 3 attempts
 
 ### Workflow Files
 
@@ -65,22 +70,27 @@ The repository includes four GitHub Actions workflows that orchestrate this flow
 
 ### Agent Assignment Mechanisms
 
-**This repository uses fully automated API-driven agent assignment via GitHub Actions workflows:**
+**This repository uses a hybrid approach combining GitHub Actions automation with Copilot Workspace manual triggering:**
 
-**Workflow-Triggered Automatic Assignment** (orchestration)
+**Workflow Automation** (labels, comments, state tracking)
 - Workflows trigger on events (label detection, PR creation)
-- Workflows call GraphQL API with `agentAssignment` input
-- Specified `customAgent` is automatically assigned to the issue/PR
-- Copilot starts working immediately, no manual steps needed
-- State tracked via labels (`agent-in-progress`, `review-in-progress`, etc.)
-- Complete generation → review → fix cycles execute without human intervention
+- Workflows attempt to assign Copilot via GraphQL API (when API is available)
+- Workflows post clear instructions and guidance for next steps
+- State tracked via labels (`agent-in-progress`, `review-in-progress`, `retry-count-N`)
+- Automated parsing of review results and routing logic
 
-**API Details:**
-- **GraphQL Mutations Used**: `replaceActorsForAssignable`, `addAssigneesToAssignable`, `updateIssue`, `createIssue`
-- **Key Parameters**: 
-  - `agentAssignment` object with `customAgent` field specifies which agent to use
-  - `customInstructions` field provides task-specific guidance
-  - Requires `GraphQL-Features` header: `issues_copilot_assignment_api_support,coding_agent_model_selection`
+**Manual Copilot Workspace Trigger** (actual agent execution)
+- User opens issue/PR in Copilot Workspace (click "Open in Workspace" button)
+- User selects the appropriate custom agent from dropdown (`adf-generate` or `adf-review`)
+- Copilot reads the agent instructions from `.github/agents/` directory
+- Agent executes the task following its defined instructions
+- Agent creates/updates PRs and posts comments with results
+
+**Why Both Are Needed:**
+- GitHub Copilot Workspace requires manual triggering from the UI
+- Workflows automate the orchestration logic (routing, retry counting, escalation)
+- This combination enables a mostly-automated generation → review → fix cycle
+- Clear workflow comments guide users on which agent to select at each step
 
 ## Repository Structure
 
@@ -205,193 +215,218 @@ All agent assignments now use GraphQL mutations with `agentAssignment` input tha
 
 ---
 
-### Step 5: Test the Full Automated Flow
+### Step 5: Test the Agent Orchestration Flow
 
-The entire flow is now **fully automated** with no manual agent assignment needed.
+The flow combines workflow automation with manual Copilot Workspace triggers.
 
-#### Step 5a: Create an Issue - Workflow Does the Rest
+#### Step 5a: Create an Issue
 
-1. **Create a new issue** labeled `adf-generate`
+1. **Create a new issue** with the label `adf-generate`
    - Title: `Create a copy pipeline from Azure Blob Storage to Azure SQL Database`
-   - Body: Use template from [examples/sample-issue.md](examples/sample-issue.md)
+   - Body: Use the template from [examples/sample-issue.md](examples/sample-issue.md)
+   - Add label: `adf-generate`
 
-#### Step 5b: Automatic Generation Agent Assignment
+#### Step 5b: Workflow Triggers and You Open in Workspace
 
 2. **The `assign-adf-generate-agent.yml` workflow triggers automatically:**
    - Detects the `adf-generate` label
-   - Calls GraphQL API to assign Copilot with `customAgent: "adf-generate"`
-   - **ADF Generation Agent starts immediately** (no human click needed)
-   - Posts status comment: `🤖 ADF Pipeline Generation Agent Assigned`
+   - Attempts to assign Copilot via GraphQL API
+   - Posts comment: `🤖 ADF Pipeline Generation Agent Assigned` with instructions
    - Adds label: `agent-in-progress`
-   - Agent generates the pipeline and creates a PR with label `adf-pipeline`
+   
+3. **You trigger the agent manually:**
+   - Click the **"Open in Workspace"** button on the issue (top right corner)
+   - In Copilot Workspace, select **"adf-generate"** from the custom agents dropdown
+   - Copilot reads the agent instructions and starts working
+   - Agent generates the pipeline JSON and creates a PR
+   - Agent adds the label `adf-pipeline` to the PR
 
-#### Step 5c: Automatic Review Agent Assignment
+#### Step 5c: Review Agent Assignment
 
-3. **The `assign-adf-review-agent.yml` workflow triggers automatically:**
-   - Detects the PR with `adf-pipeline` label
-   - Calls GraphQL API to assign Copilot with `customAgent: "adf-review"`
-   - **ADF Review Agent starts immediately** (no human click needed)
-   - Posts status comment: `🔍 ADF Pipeline Review Agent Assigned`
+4. **The `assign-adf-review-agent.yml` workflow triggers on PR creation:**
+   - Detects the `adf-pipeline` label on the new PR
+   - Attempts to assign Copilot for review
+   - Posts comment: `🔍 ADF Pipeline Review Agent Assigned` with instructions
    - Adds labels: `review-in-progress`, `retry-count-1`
-   - Agent reviews and posts detailed findings
 
-#### Step 5d: Automatic Routing Based on Review Results
+5. **You trigger the review agent manually:**
+   - Go to the PR created by the generation agent
+   - Click **"Open in Workspace"** button on the PR
+   - Select **"adf-review"** from the custom agents dropdown
+   - Review agent analyzes the pipeline and posts findings
 
-4. **The `handle-adf-review-results.yml` workflow parses review findings automatically:**
+#### Step 5d: Automated Routing Based on Review Results
+
+6. **The `handle-adf-review-results.yml` workflow parses the review automatically:**
 
    **If errors found:**
-   - Calls GraphQL API to re-assign Copilot with `customAgent: "adf-generate"`
+   - Workflow parses the review comment for `ERRORS:` section
    - Posts: `🔧 Issues Found - Routing Back to Generation Agent`
    - Labels: `changes-requested`, `generation-in-progress`
    - Increments: `retry-count-2`
-   - **Generation agent automatically continues fixing** (no human clicks needed)
-   - Review cycle repeats automatically
+   - **You re-open the PR in Workspace** and select `adf-generate` to fix
+   - Generation agent reads the review feedback and fixes issues
+   - Review cycle can repeat (up to 3 times)
 
    **If warnings only:**
-   - Posts approval comment
+   - Workflow posts approval comment
    - Labels: `approved-with-warnings`
-   - Ready for human merge decision (optional fixes)
+   - PR is ready for human review and merge
 
    **If no issues:**
-   - Posts approval comment
+   - Workflow posts approval comment
    - Labels: `approved`
-   - Ready to merge immediately
+   - PR is ready to merge
 
 #### Step 5e: Automatic Escalation After Max Retries
 
-5. **If errors persist through 3 retry cycles:**
+7. **If errors persist after 3 review cycles:**
    - The `escalate-to-human-review.yml` workflow detects `retry-count-3`
-   - Posts escalation comment
+   - Posts escalation comment with context
    - Adds labels: `needs-human-review`, `escalated`
-   - **Human intervention required:**
-     - A maintainer reviews the issue requirements and PR
-     - Decides whether to fix manually, clarify requirements, or close
-     - Closes the issue when resolved
+   - **Human maintainer** reviews the requirements and PR
+   - Decides whether to fix manually, clarify requirements, or close
 
-#### Full Automated Workflow Diagram
+#### Workflow Diagram
 
 ```
 ┌─ Issue labeled "adf-generate"
 │
-└─ Workflow: assign-adf-generate-agent.yml
+└─ Workflow: Posts instructions → YOU open in Workspace
    │
-   ├─ GraphQL API: Assign Copilot with customAgent: "adf-generate"
-   │  └─ Agent: Generate pipeline → Create PR "adf-pipeline"
+   ├─ Select "adf-generate" agent
+   │  └─ Agent: Generate pipeline → Create PR with "adf-pipeline" label
    │
-   └─ Workflow: assign-adf-review-agent.yml (triggers on PR label)
+   └─ Workflow: Detects PR, posts instructions
       │
-      ├─ GraphQL API: Assign Copilot with customAgent: "adf-review"
+      ├─ YOU open PR in Workspace → Select "adf-review" agent
       │  └─ Agent: Review pipeline → Post findings
       │
-      └─ Workflow: handle-adf-review-results.yml (parses results)
+      └─ Workflow: Parses review results automatically
          │
-         ├─ If ERRORS:
-         │  ├─ GraphQL API: Re-assign Copilot with customAgent: "adf-generate"
+         ├─ If ERRORS found:
+         │  ├─ Posts fix instructions
+         │  ├─ YOU re-open in Workspace → Select "adf-generate"
          │  ├─ Agent: Fix issues → Push to branch
          │  └─ Loop back to review (up to 3 retries)
          │
-         ├─ If WARNINGS or CLEAN:
-         │  └─ Label PR "approved" or "approved-with-warnings"
+         ├─ If WARNINGS only:
+         │  └─ Label "approved-with-warnings" → Human merge decision
+         │
+         ├─ If CLEAN:
+         │  └─ Label "approved" → Ready to merge
          │
          └─ If retry-count >= 3:
-            └─ Workflow: escalate-to-human-review.yml
-               └─ Add "needs-human-review" label → Await human decision
+            └─ Workflow: Escalate to human review
 ```
 
 ---
 
-## Workflow Orchestration: Full Automation via GraphQL API
+## Workflow Orchestration: Hybrid Automation + Manual Triggers
 
 ### Why Workflows Are Needed
 
-Workflows handle the complete orchestration by:
+Workflows provide the orchestration logic while Copilot Workspace provides the execution:
 
-1. **Detecting events** — Issue labels, PR creation
-2. **Calling GraphQL APIs** — Assigning Copilot with specific custom agents via `agentAssignment` input
-3. **Parsing responses** — Reading agent output to detect errors/approvals
-4. **Routing handoffs** — Automatically re-assigning agents for generation → review → fix cycles
-5. **Tracking state** — Using retry counter labels to enforce max cycles (3)
-6. **Escalating** — Adding `needs-human-review` when max retries exceeded
+1. **Detecting events** — Issue labels, PR creation, review comments
+2. **Attempting Copilot assignment** — Tries to assign via GraphQL API (gracefully fails if unavailable)
+3. **Posting clear instructions** — Guides users on which agent to select in Workspace
+4. **Parsing responses** — Reading agent output to detect errors/approvals
+5. **Routing handoffs** — Automatically determining next steps and posting instructions
+6. **Tracking state** — Using retry counter labels to enforce max cycles (3)
+7. **Escalating** — Adding `needs-human-review` when max retries exceeded
 
 ### Workflow Mechanics
 
 #### `assign-adf-generate-agent.yml`
 - **Trigger**: Issue labeled `adf-generate`
-- **Action**: Calls GraphQL API to assign Copilot with `customAgent: "adf-generate"` and `customInstructions`
-- **Result**: ADF Generation Agent starts automatically, reads issue, generates pipeline, opens PR
-- **Why needed**: Detects when generation is requested and starts agent without manual intervention
+- **Actions**: 
+  - Attempts GraphQL API Copilot assignment (may not be supported yet)
+  - Posts clear instructions for opening issue in Copilot Workspace
+  - Adds `agent-in-progress` label for state tracking
+- **User action**: Open issue in Workspace, select "adf-generate" agent
+- **Why needed**: Detects when generation is requested and guides user to correct agent
 
 #### `assign-adf-review-agent.yml`
-- **Trigger**: PR labeled `adf-pipeline` is created
-- **Action**: Calls GraphQL API to assign Copilot with `customAgent: "adf-review"` and `customInstructions`
-- **Result**: ADF Review Agent starts automatically, analyzes pipeline, posts findings
-- **Why needed**: Automatically requests review when PR is created, without manual ticket tracking
+- **Trigger**: PR labeled `adf-pipeline` is created or updated
+- **Actions**:
+  - Attempts GraphQL API Copilot assignment (may not be supported yet)
+  - Posts instructions for opening PR in Copilot Workspace
+  - Adds `review-in-progress` and `retry-count-1` labels
+- **User action**: Open PR in Workspace, select "adf-review" agent
+- **Why needed**: Automatically detects PRs needing review and guides user
 
 #### `handle-adf-review-results.yml`
 - **Trigger**: Comment containing `ADF Pipeline Review Results` is posted
 - **Parsing**: Looks for `ERRORS:` and `❌` or `WARNINGS:` and `⚠️` in the review comment
-- **Actions on errors**: Calls GraphQL API to re-assign Copilot with `customAgent: "adf-generate"` and error-fix instructions
+- **Actions on errors**: 
+  - Posts instructions for re-opening in Workspace with "adf-generate" agent
+  - Increments retry counter label
+  - Adds `changes-requested` label
 - **Actions on warnings/clean**: Posts approval comment, adds appropriate label
-- **Why needed**: Automatically detects review outcome and routes appropriately without human decision-making
+- **Why needed**: Automatically detects review outcome and routes appropriately
 
 #### `escalate-to-human-review.yml`
-- **Trigger**: Retry count reaches 3 after fix cycles
+- **Trigger**: Any comment on a PR with `retry-count-3` label
 - **Action**: Adds `needs-human-review` and `escalated` labels, posts escalation alert
-- **Why needed**: Prevents infinite agent loops; enforces fallback to human judgment
+- **Why needed**: Prevents infinite loops; enforces fallback to human judgment after 3 cycles
 - **Manual step**: Maintainer reviews and decides on next action (fix, clarify, close)
 
-### What Works Fully Automated
+### What Is Automated
 
-✅ **Agent assignment via GraphQL API** — Custom agents assigned without manual dropdown clicks  
 ✅ **State tracking via labels** — (`retry-count-*`, `agent-in-progress`, `review-in-progress`, etc.)  
 ✅ **Review result detection** — Parsing agent comments to identify errors/warnings/clean status  
-✅ **Automatic agent handoffs** — Generation → review → fix cycles continue without human intervention  
+✅ **Routing logic** — Determining which agent should work next based on review results  
 ✅ **Retry cycle counting** — Enforced via labels across generation→review→fix loops  
-✅ **Escalation enforcement** — Automatic handoff to human after 3 cycles  
+✅ **Escalation enforcement** — Automatic escalation to human after 3 cycles  
+✅ **Clear instructions** — Workflow comments guide users on which agent to select
 
-### What Still Requires Human Judgment
+### What Requires Manual Steps
 
-⚠️ **Escalation resolution** — After max retries, maintainer must review and decide:  
-  - Fix the pipeline manually  
-  - Update requirements for clarity  
-  - Close the issue if not feasible  
+⚠️ **Opening issues/PRs in Copilot Workspace** — User clicks "Open in Workspace" button  
+⚠️ **Selecting the custom agent** — User selects correct agent from dropdown  
+⚠️ **Escalation resolution** — After max retries, maintainer must review and decide
 
 ### API Implementation Details
 
-Workflows use GitHub GraphQL API with the following approach:
+Workflows attempt to use GitHub GraphQL API for Copilot assignment:
 
 ```bash
+# Get Copilot bot user ID
+COPILOT_ID=$(gh api graphql -f query='
+query {
+  user(login: "copilot") {
+    id
+  }
+}' --jq '.data.user.id')
+
+# Assign Copilot to issue/PR
 gh api graphql \
   -H 'GraphQL-Features: issues_copilot_assignment_api_support,coding_agent_model_selection' \
-  -f query='mutation {
-    replaceActorsForAssignable(input: {
-      assignableId: "<ISSUE_OR_PR_NODE_ID>",
-      actorIds: ["<COPILOT_BOT_ID>"],
-      agentAssignment: {
-        targetRepositoryId: "<REPO_NODE_ID>",
-        baseRef: "main",
-        customInstructions: "Task-specific guidance here",
-        customAgent: "adf-generate"  # or "adf-review"
-      }
+  -f query='
+  mutation($issueId: ID!, $actorIds: [ID!]!) {
+    addAssigneesToAssignable(input: {
+      assignableId: $issueId,
+      assigneeIds: $actorIds
     }) {
       assignable {
         ... on Issue { id title }
-	... on PullRequest { id title }
+        ... on PullRequest { id title }
       }
     }
-  }'
+  }' \
+  -f issueId="$ISSUE_NODE_ID" \
+  -f actorIds="[$COPILOT_ID]"
 ```
 
-**Key endpoints:**
-- `createIssue` — Create issue and assign agent in one call
-- `updateIssue` — Update issue and assign agent
-- `addAssigneesToAssignable` — Add agent to existing issue/PR
-- `replaceActorsForAssignable` — Replace agent assignments
-
-**Required GraphQL headers:**
-- `GraphQL-Features: issues_copilot_assignment_api_support,coding_agent_model_selection`
+**Note**: The GraphQL API for automated Copilot agent assignment may not be fully available yet. The workflows gracefully fall back to posting instructions when the API is unavailable, guiding users to manually trigger agents in Copilot Workspace.
 
 ---
+
+| Copilot doesn't pick the right agent | Mention the agent explicitly in your comment: `@adf-generate` or `@adf-review`. Use the `adf-generate` label on issues. |
+| Copilot isn't available as an assignee | Confirm your org/plan has Copilot Coding Agent enabled. Check organization Copilot policies. |
+| Review/fix cycle runs too long | The agents are instructed to stop after 3 round-trips and add the `needs-human-review` label. |
+| Agent doesn't follow the templates | The agent instructions reference `templates/` and `rules/` directories — make sure those files exist on the branch Copilot is working from. |
 
 ## How the Agents Work
 
@@ -442,7 +477,8 @@ Findings are categorized as **error** (blocks approval), **warning** (approved w
 | Problem | Solution |
 |---------|----------|
 | Copilot doesn't use the agent instructions | Make sure the `.github/agents/` directory is on the default branch. Verify Copilot Coding Agent is enabled for the repo. |
-| Copilot doesn't pick the right agent | Mention the agent explicitly in your comment: `@adf-generate` or `@adf-review`. Use the `adf-generate` label on issues. |
+| Agent never starts working | After labeling the issue with `adf-generate`, you must manually click "Open in Workspace" and select the agent from the dropdown. |
+| Copilot doesn't pick the right agent | In Copilot Workspace, ensure you select the correct custom agent (`adf-generate` or `adf-review`) from the dropdown menu. |
 | Copilot isn't available as an assignee | Confirm your org/plan has Copilot Coding Agent enabled. Check organization Copilot policies. |
-| Review/fix cycle runs too long | The agents are instructed to stop after 3 round-trips and add the `needs-human-review` label. |
+| Review/fix cycle runs too long | The workflows enforce a maximum of 3 review cycles before escalating to `needs-human-review`. |
 | Agent doesn't follow the templates | The agent instructions reference `templates/` and `rules/` directories — make sure those files exist on the branch Copilot is working from. |
