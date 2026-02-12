@@ -1,0 +1,218 @@
+{
+  "name": "copy_blob_to_sql_sales_data",
+  "properties": {
+    "description": "Copies CSV files from Azure Blob Storage (raw-data/sales/) to Azure SQL Database staging table (staging.sales_data). Truncates the target table before loading. Part of the sales data warehouse ingestion process.",
+    "activities": [
+      {
+        "name": "TruncateStagingTable",
+        "type": "Script",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.00:05:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "scripts": [
+            {
+              "type": "Query",
+              "text": {
+                "value": "@concat('TRUNCATE TABLE ', pipeline().parameters.sinkTable)",
+                "type": "Expression"
+              }
+            }
+          ],
+          "scriptBlockExecutionTimeout": "02:00:00"
+        },
+        "linkedServiceName": {
+          "referenceName": "@pipeline().parameters.sinkLinkedService",
+          "type": "LinkedServiceReference"
+        }
+      },
+      {
+        "name": "CopySalesDataToSQL",
+        "type": "Copy",
+        "dependsOn": [
+          {
+            "activity": "TruncateStagingTable",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 3,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "source": {
+            "type": "DelimitedTextSource",
+            "storeSettings": {
+              "type": "AzureBlobStorageReadSettings",
+              "recursive": false,
+              "wildcardFolderPath": {
+                "value": "@pipeline().parameters.sourceFolderPath",
+                "type": "Expression"
+              },
+              "wildcardFileName": {
+                "value": "@pipeline().parameters.sourceFilePattern",
+                "type": "Expression"
+              },
+              "enablePartitionDiscovery": false
+            },
+            "formatSettings": {
+              "type": "DelimitedTextReadSettings",
+              "skipLineCount": 0
+            }
+          },
+          "sink": {
+            "type": "SqlSink",
+            "writeBatchSize": 10000,
+            "writeBatchTimeout": "00:30:00",
+            "sqlWriterTableType": {
+              "value": "@pipeline().parameters.sinkTable",
+              "type": "Expression"
+            },
+            "disableMetricsCollection": false
+          },
+          "enableStaging": false,
+          "translator": {
+            "type": "TabularTranslator",
+            "typeConversion": true,
+            "typeConversionSettings": {
+              "allowDataTruncation": true,
+              "treatBooleanAsNumber": false
+            }
+          }
+        },
+        "inputs": [
+          {
+            "referenceName": "@pipeline().parameters.sourceDataset",
+            "type": "DatasetReference"
+          }
+        ],
+        "outputs": [
+          {
+            "referenceName": "@pipeline().parameters.sinkDataset",
+            "type": "DatasetReference"
+          }
+        ]
+      },
+      {
+        "name": "LogPipelineStatus",
+        "type": "SqlServerStoredProcedure",
+        "dependsOn": [
+          {
+            "activity": "CopySalesDataToSQL",
+            "dependencyConditions": [
+              "Succeeded",
+              "Failed"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:05:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "storedProcedureName": {
+            "value": "@pipeline().parameters.logStoredProcedure",
+            "type": "Expression"
+          },
+          "storedProcedureParameters": {
+            "PipelineName": {
+              "value": {
+                "value": "@pipeline().Pipeline",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "RunId": {
+              "value": {
+                "value": "@pipeline().RunId",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "Status": {
+              "value": {
+                "value": "@activity('CopySalesDataToSQL').Status",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "RowsCopied": {
+              "value": {
+                "value": "@activity('CopySalesDataToSQL').output.rowsCopied",
+                "type": "Expression"
+              },
+              "type": "Int64"
+            },
+            "ExecutionTime": {
+              "value": {
+                "value": "@utcnow()",
+                "type": "Expression"
+              },
+              "type": "DateTime"
+            }
+          }
+        },
+        "linkedServiceName": {
+          "referenceName": "@pipeline().parameters.sinkLinkedService",
+          "type": "LinkedServiceReference"
+        }
+      }
+    ],
+    "parameters": {
+      "sourceFolderPath": {
+        "type": "String",
+        "defaultValue": "raw-data/sales/"
+      },
+      "sourceFilePattern": {
+        "type": "String",
+        "defaultValue": "sales_*.csv"
+      },
+      "sinkTable": {
+        "type": "String",
+        "defaultValue": "staging.sales_data"
+      },
+      "sourceDataset": {
+        "type": "String",
+        "defaultValue": "BlobStorageCSVDataset"
+      },
+      "sinkDataset": {
+        "type": "String",
+        "defaultValue": "AzureSQLDatabaseDataset"
+      },
+      "sourceLinkedService": {
+        "type": "String",
+        "defaultValue": "AzureBlobStorageLinkedService"
+      },
+      "sinkLinkedService": {
+        "type": "String",
+        "defaultValue": "AzureSQLDatabaseLinkedService"
+      },
+      "logStoredProcedure": {
+        "type": "String",
+        "defaultValue": "[dbo].[LogPipelineRun]"
+      }
+    },
+    "annotations": [
+      "auto-generated",
+      "sales-ingestion",
+      "copy-pipeline",
+      "blob-to-sql"
+    ],
+    "folder": {
+      "name": "generated"
+    }
+  }
+}
