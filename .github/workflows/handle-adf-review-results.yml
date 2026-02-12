@@ -131,13 +131,8 @@ jobs:
           PR_NODE_ID: ${{ github.event.issue.node_id }}
           REPO_NODE_ID: ${{ github.event.repository.node_id }}
         run: |
-          # Get Copilot bot user ID
-          COPILOT_ID=$(gh api graphql -f query='
-          query {
-            user(login: "copilot") {
-              id
-            }
-          }' --jq '.data.user.id' 2>/dev/null || echo "")
+          # Get Copilot bot node ID using REST API (GraphQL user query doesn't work for bots)
+          COPILOT_ID=$(gh api /users/copilot-swe-agent[bot] --jq '.node_id' 2>/dev/null || echo "")
           
           if [ -z "$COPILOT_ID" ]; then
             echo "Warning: Could not retrieve Copilot bot ID."
