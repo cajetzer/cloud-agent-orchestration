@@ -107,16 +107,16 @@ jobs:
           # Assign Copilot as reviewer with custom agent using agentAssignment
           gh api graphql \
             -H 'GraphQL-Features: issues_copilot_assignment_api_support,coding_agent_model_selection' \
-            -f query='
-            mutation($prId: ID!, $actorIds: [ID!]!, $repoId: ID!) {
+            -f query="
+            mutation {
               addAssigneesToAssignable(input: {
-                assignableId: $prId,
-                assigneeIds: $actorIds,
+                assignableId: \"$PR_NODE_ID\",
+                assigneeIds: [\"$COPILOT_ID\"],
                 agentAssignment: {
-                  targetRepositoryId: $repoId,
-                  baseRef: "main",
-                  customAgent: "adf-review",
-                  customInstructions: "Review the ADF pipeline JSON for correctness, best practices, and security. Post findings as a comment."
+                  targetRepositoryId: \"$REPO_NODE_ID\",
+                  baseRef: \"main\",
+                  customAgent: \"adf-review\",
+                  customInstructions: \"Review the ADF pipeline JSON for correctness, best practices, and security. Post findings as a comment.\"
                 }
               }) {
                 assignable {
@@ -127,10 +127,7 @@ jobs:
                   }
                 }
               }
-            }' \
-            -f prId="$PR_NODE_ID" \
-            -f actorIds="[\"$COPILOT_ID\"]" \
-            -f repoId="$REPO_NODE_ID" || {
+            }" || {
               echo "GraphQL assignment failed. Manual workspace trigger required."
               exit 0
             }
