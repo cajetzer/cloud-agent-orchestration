@@ -134,4 +134,20 @@ cat > pipelines/copy_blob_to_sql_sales_data.json << 'EOF'
 }
 EOF
 
-echo "Pipeline JSON file created at pipelines/copy_blob_to_sql_sales_data.json"
+echo "✅ Pipeline JSON file created at pipelines/copy_blob_to_sql_sales_data.json"
+echo ""
+echo "Pipeline Details:"
+echo "  Name: copy_blob_to_sql_sales_data"
+echo "  Type: Copy Activity (Blob Storage → SQL Database)"
+echo "  Source: Azure Blob Storage (raw-data/sales/)"
+echo "  Sink: Azure SQL Database (staging.sales_data)"
+echo "  Features: CSV with headers, pre-copy truncate, retry policy"
+echo ""
+echo "Next steps:"
+echo "  1. Review the JSON file: cat pipelines/copy_blob_to_sql_sales_data.json"
+echo "  2. Validate JSON syntax: python -m json.tool pipelines/copy_blob_to_sql_sales_data.json"
+echo "  3. Import to ADF Studio"
+echo "  4. Configure linked services and datasets"
+echo "  5. Create schedule trigger (daily at 2:00 AM UTC)"
+echo ""
+echo "For detailed instructions, see PIPELINE_README.md"
