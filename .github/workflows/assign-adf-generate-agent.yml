@@ -6,16 +6,13 @@ on:
 
 permissions:
   issues: write
-  contents: read
 
 jobs:
-  assign-generate-agent:
+  assign-agent:
     runs-on: ubuntu-latest
     if: contains(github.event.issue.labels.*.name, 'adf-generate')
     steps:
-      - name: Check if Copilot already assigned
-        id: check
-        uses: actions/github-script@v7
+      - uses: actions/github-script@v7
         with:
           script: |
             const issue = context.payload.issue;
@@ -23,33 +20,21 @@ jobs:
             
             if (assignees.includes('copilot-swe-agent[bot]')) {
               console.log('Copilot already assigned');
-              core.setOutput('should_assign', 'false');
-            } else {
-              console.log('Copilot not yet assigned');
-              core.setOutput('should_assign', 'true');
+              return;
             }
-      
-      - name: Assign Copilot Agent
-        if: steps.check.outputs.should_assign == 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const issue_number = context.issue.number;
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
             
-            console.log('Assigning Copilot to issue for ADF pipeline generation');
+            console.log('Assigning Copilot to issue');
             
             await github.rest.issues.createComment({
-              owner,
-              repo,
-              issue_number,
-              body: '## Copilot Agent Assignment\n\nAssigning Copilot to generate the ADF pipeline based on the issue requirements.\n\nWhat I will do:\n1. Read and analyze all pipeline requirements\n2. Generate a complete ADF pipeline JSON\n3. Create a PR with the pipeline configuration\n4. Ensure all requirements are met\n\nStatus: Starting pipeline generation...'
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: 'Copilot Agent Assignment - Generating ADF pipeline based on requirements'
             });
             
             await github.rest.issues.addLabels({
-              owner,
-              repo,
-              issue_number,
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
               labels: ['agent-in-progress']
             });
