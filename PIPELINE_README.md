@@ -6,8 +6,8 @@ This ADF pipeline copies CSV sales data from Azure Blob Storage to Azure SQL Dat
 
 ## Generated Files
 
-1. **Pipeline JSON**: `/tmp/copy_blob_to_sql_sales_data.json` (needs to be moved to `pipelines/` directory)
-2. **Setup Script**: `setup-pipeline.sh` - Run this to create the pipelines directory and move the JSON file
+1. **Setup Script**: `setup-pipeline.sh` - Contains the complete pipeline JSON and creates the pipelines directory
+2. **Pipeline JSON**: Will be created at `pipelines/copy_blob_to_sql_sales_data.json` when setup script is run
 
 ## Pipeline Details
 
@@ -160,6 +160,4 @@ Potential improvements:
 
 ## Full Pipeline JSON
 
-The complete pipeline JSON is available in `/tmp/copy_blob_to_sql_sales_data.json`.
-
-Run the `setup-pipeline.sh` script to move it to the correct location.
+The complete pipeline JSON is embedded in the `setup-pipeline.sh` script and will be created at `pipelines/copy_blob_to_sql_sales_data.json` when the script is run.
