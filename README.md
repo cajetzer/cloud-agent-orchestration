@@ -487,10 +487,12 @@ GitHub requires manual approval for workflows triggered by bot accounts, includi
 
 **How this repository solves it:**
 
-The `auto-approve-copilot-runs.yml` workflow automatically approves workflow runs triggered by Copilot:
-1. Triggers when a workflow enters `action_required` status
-2. Verifies the actor is `copilot-swe-agent[bot]`
-3. Calls the GitHub API to approve the run
+The `auto-approve-copilot-runs.yml` workflow runs on a schedule (every 2 minutes) and automatically approves pending workflow runs triggered by Copilot:
+1. Queries for workflow runs with `action_required` status
+2. Filters to only runs from `copilot-swe-agent[bot]`
+3. Calls the GitHub API to approve each pending run
+
+Why scheduled polling? The `workflow_run` trigger itself requires approval when triggered by a Copilot-initiated workflow (chicken-and-egg problem). Scheduled workflows run from the main branch and don't require approval.
 
 This enables fully automatic agent-to-agent handoffs without manual intervention.
 
