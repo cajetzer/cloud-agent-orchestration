@@ -422,12 +422,6 @@ gh api graphql \
 **Note**: The GraphQL API for automated Copilot agent assignment may not be fully available yet. The workflows gracefully fall back to posting instructions when the API is unavailable, guiding users to manually trigger agents in Copilot Workspace.
 
 ---
-
-| Copilot doesn't pick the right agent | Mention the agent explicitly in your comment: `@adf-generate` or `@adf-review`. Use the `adf-generate` label on issues. |
-| Copilot isn't available as an assignee | Confirm your org/plan has Copilot Coding Agent enabled. Check organization Copilot policies. |
-| Review/fix cycle runs too long | The agents are instructed to stop after 3 round-trips and add the `needs-human-review` label. |
-| Agent doesn't follow the templates | The agent instructions reference `templates/` and `rules/` directories — make sure those files exist on the branch Copilot is working from. |
-
 ## How the Agents Work
 
 ### `adf-generate` Agent

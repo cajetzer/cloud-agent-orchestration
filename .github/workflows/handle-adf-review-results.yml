@@ -142,6 +142,11 @@ jobs:
           if [ -z "$COPILOT_ID" ]; then
             echo "Warning: Could not retrieve Copilot bot ID."
             echo "The generation agent will need to be manually re-assigned in Copilot Workspace."
+            echo ""
+            echo "To continue the fix cycle:"
+            echo "1. Open this PR in Copilot Workspace (click 'Open in Workspace' button)"
+            echo "2. Select the 'adf-generate' agent from the dropdown"
+            echo "3. The agent will read the review feedback and fix the issues"
             exit 0
           fi
           

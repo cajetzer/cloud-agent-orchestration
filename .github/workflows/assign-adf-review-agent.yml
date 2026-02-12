@@ -73,9 +73,9 @@ jobs:
                     '_Assigning Copilot with review agent..._'
             });
             
-            // Add or update labels
+            // Only add retry-count-1 if no retry label exists
             const labels = ['review-in-progress'];
-            if (!retryCount || retryCount === '1') {
+            if (retryCount === 1) {
               labels.push('retry-count-1');
             }
             
