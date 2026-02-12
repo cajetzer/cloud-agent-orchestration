@@ -1,0 +1,99 @@
+{
+  "name": "copy_blob_to_data_lake_events",
+  "properties": {
+    "description": "Copies JSON event files from Azure Blob Storage (incoming/events/) to Azure Data Lake Gen2 (bronze/events/), preserving folder structure. Runs every 4 hours as part of the data lake ingestion layer.",
+    "activities": [
+      {
+        "name": "CopyEventsToDataLake",
+        "type": "Copy",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 60,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "source": {
+            "type": "BinarySource",
+            "storeSettings": {
+              "type": "AzureBlobStorageReadSettings",
+              "recursive": true,
+              "wildcardFolderPath": {
+                "value": "@pipeline().parameters.sourceFolderPath",
+                "type": "Expression"
+              },
+              "wildcardFileName": "events_*.json",
+              "deleteFilesAfterCompletion": false
+            },
+            "formatSettings": {
+              "type": "BinaryReadSettings"
+            }
+          },
+          "sink": {
+            "type": "BinarySink",
+            "storeSettings": {
+              "type": "AzureBlobFSWriteSettings",
+              "copyBehavior": "PreserveHierarchy"
+            }
+          },
+          "enableStaging": false,
+          "validateDataConsistency": true,
+          "dataIntegrationUnits": 2
+        },
+        "inputs": [
+          {
+            "referenceName": "BlobStorageSourceDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "folderPath": {
+                "value": "@pipeline().parameters.sourceFolderPath",
+                "type": "Expression"
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "referenceName": "DataLakeSinkDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "folderPath": {
+                "value": "@pipeline().parameters.sinkFolderPath",
+                "type": "Expression"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "parameters": {
+      "sourceFolderPath": {
+        "type": "String",
+        "defaultValue": "incoming/events/"
+      },
+      "sinkFolderPath": {
+        "type": "String",
+        "defaultValue": "bronze/events/"
+      },
+      "sourceContainerName": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "sinkContainerName": {
+        "type": "String",
+        "defaultValue": ""
+      }
+    },
+    "annotations": [
+      "auto-generated",
+      "copy-pipeline",
+      "blob-to-datalake",
+      "ingestion-layer"
+    ],
+    "folder": {
+      "name": "generated"
+    }
+  }
+}
