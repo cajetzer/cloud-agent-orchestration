@@ -22,7 +22,7 @@ Two custom agents for Azure Data Factory pipeline development — defined entire
 - **Reads and writes files** — It can explore your codebase and make changes
 - **Follows instructions** — It reads issue descriptions and custom agent definitions
 
-> 📖 **Learn more:** [GitHub Copilot Coding Agent Documentation](https://docs.github.com/en/copilot/using-github-copilot/using-copilot-coding-agent)
+> 📖 **Learn more:** [GitHub Copilot coding agent](https://docs.github.com/en/copilot/using-github-copilot/using-copilot-coding-agent)
 
 ### What are Custom Agents?
 
@@ -46,30 +46,16 @@ description: Does a specific task
 3. Create a PR with results
 ```
 
-> 📖 **Learn more:** [Creating Custom Agents](https://docs.github.com/en/copilot/customizing-copilot/creating-custom-agents)
+> 📖 **Learn more:** [Customizing Copilot coding agent](https://docs.github.com/en/copilot/customizing-copilot/customizing-the-behavior-of-copilot-coding-agent)
 
 ### How Does Agent Assignment Work?
 
 There are two ways to assign Copilot to an issue:
 
-1. **Manual (UI):** Click "Open in Workspace" → Select agent from dropdown
-2. **Automatic (API):** GitHub Actions workflow calls GraphQL API
+1. **Manual (UI):** Assign Copilot to an issue, then select a custom agent when it starts
+2. **Automatic (API):** GitHub Actions workflow calls GraphQL API with `agentAssignment`
 
-This repository demonstrates **automatic assignment** using the GraphQL `addAssigneesToAssignable` mutation with the `agentAssignment` parameter:
-
-```graphql
-mutation {
-  addAssigneesToAssignable(input: {
-    assignableId: "<issue-node-id>",
-    assigneeIds: ["<copilot-bot-id>"],
-    agentAssignment: {
-      targetRepositoryId: "<repo-node-id>",
-      customAgent: "adf-generate",        # Which custom agent to use
-      customInstructions: "Extra context"  # Optional task-specific guidance
-    }
-  }) { ... }
-}
-```
+This repository demonstrates **automatic assignment** — see [How Automatic Assignment Works](#how-automatic-assignment-works) for the GraphQL details.
 
 > 📖 **Learn more:** [GitHub GraphQL API](https://docs.github.com/en/graphql)
 
@@ -251,14 +237,33 @@ The agents use labels for routing and status tracking. Create them in your repos
 1. Go to **Issues → Labels** (or navigate to `https://github.com/<owner>/<repo>/labels`).
 2. Create the following labels:
 
+**Trigger Labels:**
+
 | Label | Color (suggested) | Description |
 |-------|-------------------|-------------|
 | `adf-generate` | `#1D76DB` (blue) | Marks issues that request ADF pipeline generation |
 | `adf-pipeline` | `#0E8A16` (green) | Marks PRs containing ADF pipelines |
+
+**Status Labels:**
+
+| Label | Color (suggested) | Description |
+|-------|-------------------|-------------|
+| `agent-in-progress` | `#FBCA04` (yellow) | Generation agent is working |
+| `review-in-progress` | `#FBCA04` (yellow) | Review agent is working |
+| `generation-in-progress` | `#FBCA04` (yellow) | Generation agent is fixing issues |
 | `changes-requested` | `#E11D48` (red) | Review agent found issues to fix |
 | `approved` | `#0E8A16` (green) | Pipeline passed review |
 | `approved-with-warnings` | `#F9A825` (amber) | Pipeline approved with minor suggestions |
 | `needs-human-review` | `#B60205` (red) | Max review cycles reached; human needed |
+| `escalated` | `#B60205` (red) | Issue has been escalated |
+
+**Retry Counter Labels** (create all three):
+
+| Label | Color (suggested) | Description |
+|-------|-------------------|-------------|
+| `retry-count-1` | `#C5DEF5` (light blue) | First review cycle |
+| `retry-count-2` | `#C5DEF5` (light blue) | Second review cycle |
+| `retry-count-3` | `#C5DEF5` (light blue) | Third review cycle (triggers escalation) |
 
 ---
 
@@ -541,11 +546,11 @@ This pattern is applicable to many scenarios:
 
 | Topic | Resource |
 |-------|----------|
-| **Copilot Coding Agent** | [docs.github.com/copilot/using-copilot-coding-agent](https://docs.github.com/en/copilot/using-github-copilot/using-copilot-coding-agent) |
-| **Custom Agents** | [docs.github.com/copilot/creating-custom-agents](https://docs.github.com/en/copilot/customizing-copilot/creating-custom-agents) |
-| **GitHub GraphQL API** | [docs.github.com/graphql](https://docs.github.com/en/graphql) |
-| **GitHub Actions** | [docs.github.com/actions](https://docs.github.com/en/actions) |
-| **Fine-grained PATs** | [docs.github.com/authentication/managing-personal-access-tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) |
+| **Copilot Coding Agent** | [Using Copilot coding agent](https://docs.github.com/en/copilot/using-github-copilot/using-copilot-coding-agent) |
+| **Customizing Coding Agent** | [Customizing the behavior of Copilot coding agent](https://docs.github.com/en/copilot/customizing-copilot/customizing-the-behavior-of-copilot-coding-agent) |
+| **GitHub GraphQL API** | [GitHub GraphQL API documentation](https://docs.github.com/en/graphql) |
+| **GitHub Actions** | [GitHub Actions documentation](https://docs.github.com/en/actions) |
+| **Fine-grained PATs** | [Managing personal access tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) |
 
 ---
 
