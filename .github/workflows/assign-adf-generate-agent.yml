@@ -57,7 +57,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NODE_ID: ${{ github.event.issue.node_id }}
-          REPO_NODE_ID: ${{ github.event.repository.node_id }}
         run: |
           # Get Copilot bot user ID first
           COPILOT_ID=$(gh api graphql -f query='
@@ -79,7 +78,7 @@ jobs:
           gh api graphql \
             -H 'GraphQL-Features: issues_copilot_assignment_api_support,coding_agent_model_selection' \
             -f query='
-            mutation($issueId: ID!, $actorIds: [ID!]!, $repoId: ID!) {
+            mutation($issueId: ID!, $actorIds: [ID!]!) {
               addAssigneesToAssignable(input: {
                 assignableId: $issueId,
                 assigneeIds: $actorIds
@@ -94,8 +93,7 @@ jobs:
               }
             }' \
             -f issueId="$ISSUE_NODE_ID" \
-            -f actorIds="[$COPILOT_ID]" \
-            -f repoId="$REPO_NODE_ID" || {
+            -f actorIds="[$COPILOT_ID]" || {
               echo "GraphQL assignment failed. Manual workspace trigger required."
               exit 0
             }
