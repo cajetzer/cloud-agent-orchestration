@@ -34,6 +34,16 @@ Issue + "adf-generate" label
 | `templates/*.json` | ADF pipeline JSON templates (Copy, Data Flow) |
 | `rules/best_practices.json` | Review rules (retry policies, naming, security, parameterization) |
 
+## Branch and PR Policy
+
+**Never commit directly to `main`.** All changes must be made on a feature branch and submitted via pull request.
+
+When making changes:
+1. Create a new branch with a descriptive name (e.g., `fix/issue-description`, `feature/new-capability`)
+2. Commit changes to the feature branch
+3. Push the branch and create a pull request
+4. Wait for review/approval before merging
+
 ## Conventions
 
 ### Agent Definition Structure
