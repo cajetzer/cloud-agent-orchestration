@@ -36,10 +36,10 @@ jobs:
             const retryCount = retryLabel ? parseInt(retryLabel.match(/\d+/)[0]) : 0;
             
             console.log(`Current retry count: ${retryCount}`);
-            return retryCount;
+            core.setOutput('result', retryCount.toString());
 
       - name: Check for max retries and escalate
-        if: steps.get-retry.outputs.result >= 3
+        if: fromJson(steps.get-retry.outputs.result) >= 3
         uses: actions/github-script@v7
         with:
           script: |
@@ -129,7 +129,7 @@ jobs:
             }
 
       - name: Request review from maintainers
-        if: steps.get-retry.outputs.result >= 3
+        if: fromJson(steps.get-retry.outputs.result) >= 3
         uses: actions/github-script@v7
         with:
           script: |

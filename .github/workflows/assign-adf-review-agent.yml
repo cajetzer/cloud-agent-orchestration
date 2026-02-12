@@ -37,7 +37,7 @@ jobs:
             );
             
             console.log(`Review already assigned: ${reviewMentioned}`);
-            return reviewMentioned ? 'already-assigned' : 'needs-review';
+            core.setOutput('result', reviewMentioned ? 'already-assigned' : 'needs-review');
 
       - name: Assign Copilot with ADF Review Agent via GraphQL API
         if: steps.check-review.outputs.result == 'needs-review'

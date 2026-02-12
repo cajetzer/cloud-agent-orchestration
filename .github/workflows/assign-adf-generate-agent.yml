@@ -24,9 +24,10 @@ jobs:
             // Check if Copilot SWE Agent is already assigned
             if (assignees.includes('copilot-swe-agent[bot]')) {
               console.log('Copilot already assigned');
-              return 'already-assigned';
+              core.setOutput('result', 'already-assigned');
+            } else {
+              core.setOutput('result', 'needs-assignment');
             }
-            return 'needs-assignment';
       
       - name: Assign Copilot with ADF Generate Agent via GraphQL API
         if: steps.check.outputs.result == 'needs-assignment'

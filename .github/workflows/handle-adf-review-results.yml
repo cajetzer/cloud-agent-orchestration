@@ -56,11 +56,9 @@ jobs:
             
             console.log(`Errors: ${hasErrors}, Warnings only: ${hasWarningsOnly}, No issues: ${noIssues}`);
             
-            return {
-              has_errors: hasErrors,
-              warnings_only: hasWarningsOnly,
-              no_issues: noIssues
-            };
+            core.setOutput('has_errors', hasErrors.toString());
+            core.setOutput('warnings_only', hasWarningsOnly.toString());
+            core.setOutput('no_issues', noIssues.toString());
 
       - name: Handoff to Generation Agent (Errors Found)
         if: steps.review-findings.outputs.has_errors == 'true'
