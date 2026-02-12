@@ -1,0 +1,44 @@
+name: Organize Pipeline Files
+
+on:
+  push:
+    branches:
+      - 'copilot/**'
+      - 'adf-pipeline/**'
+    paths:
+      - '*.json'
+      - 'setup_pipeline.py'
+
+permissions:
+  contents: write
+
+jobs:
+  organize-files:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Check if pipeline file needs organizing
+        id: check
+        run: |
+          if [ -f "copy_blob_to_sql_sales.json" ] && [ ! -f "pipelines/copy_blob_to_sql_sales.json" ]; then
+            echo "needs_organizing=true" >> $GITHUB_OUTPUT
+          else
+            echo "needs_organizing=false" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Run pipeline organization script
+        if: steps.check.outputs.needs_organizing == 'true'
+        run: python3 setup_pipeline.py
+        
+      - name: Commit organized files
+        if: steps.check.outputs.needs_organizing == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: organize pipeline into pipelines directory [skip ci]"
+          git push
