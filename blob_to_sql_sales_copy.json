@@ -1,0 +1,175 @@
+{
+  "name": "blob_to_sql_sales_copy",
+  "properties": {
+    "description": "Copy pipeline that transfers CSV sales data from Azure Blob Storage (raw-data/sales/) to Azure SQL Database staging table (staging.sales_data). Includes pre-copy truncate and retry policy with 3 attempts.",
+    "activities": [
+      {
+        "name": "TruncateStagingTable",
+        "type": "Script",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.00:10:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": true
+        },
+        "typeProperties": {
+          "scripts": [
+            {
+              "type": "Query",
+              "text": {
+                "value": "TRUNCATE TABLE @{pipeline().parameters.sinkTable}",
+                "type": "Expression"
+              }
+            }
+          ],
+          "scriptBlockExecutionTimeout": "00:05:00",
+          "linkedService": {
+            "referenceName": "@{pipeline().parameters.sqlLinkedServiceName}",
+            "type": "LinkedServiceReference"
+          }
+        }
+      },
+      {
+        "name": "CopySalesDataFromBlobToSQL",
+        "type": "Copy",
+        "dependsOn": [
+          {
+            "activity": "TruncateStagingTable",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 3,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": true
+        },
+        "typeProperties": {
+          "source": {
+            "type": "DelimitedTextSource",
+            "storeSettings": {
+              "type": "AzureBlobStorageReadSettings",
+              "recursive": false,
+              "wildcardFileName": "sales_*.csv",
+              "enablePartitionDiscovery": false
+            },
+            "formatSettings": {
+              "type": "DelimitedTextReadSettings",
+              "skipLineCount": 0,
+              "firstRowAsHeader": true
+            }
+          },
+          "sink": {
+            "type": "SqlSink",
+            "preCopyScript": "",
+            "writeBatchSize": 10000,
+            "writeBatchTimeout": "00:30:00",
+            "tableOption": "autoCreate",
+            "disableMetricsCollection": false
+          },
+          "enableStaging": false,
+          "validateDataConsistency": true,
+          "translator": {
+            "type": "TabularTranslator",
+            "typeConversion": true,
+            "typeConversionSettings": {
+              "allowDataTruncation": false,
+              "treatBooleanAsNumber": false
+            }
+          }
+        },
+        "inputs": [
+          {
+            "referenceName": "@{pipeline().parameters.sourceDatasetName}",
+            "type": "DatasetReference",
+            "parameters": {
+              "containerPath": "@{pipeline().parameters.sourcePath}"
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "referenceName": "@{pipeline().parameters.sinkDatasetName}",
+            "type": "DatasetReference",
+            "parameters": {
+              "tableName": "@{pipeline().parameters.sinkTable}"
+            }
+          }
+        ]
+      },
+      {
+        "name": "LogPipelineRunStatus",
+        "type": "Script",
+        "dependsOn": [
+          {
+            "activity": "CopySalesDataFromBlobToSQL",
+            "dependencyConditions": [
+              "Succeeded",
+              "Failed",
+              "Skipped"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:10:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "scripts": [
+            {
+              "type": "Query",
+              "text": {
+                "value": "INSERT INTO monitoring.pipeline_runs (pipeline_name, run_id, status, rows_copied, start_time, end_time) VALUES ('@{pipeline().Pipeline}', '@{pipeline().RunId}', '@{activity('CopySalesDataFromBlobToSQL').Status}', @{activity('CopySalesDataFromBlobToSQL').output.rowsCopied}, '@{pipeline().TriggerTime}', '@{utcnow()}')",
+                "type": "Expression"
+              }
+            }
+          ],
+          "scriptBlockExecutionTimeout": "00:05:00",
+          "linkedService": {
+            "referenceName": "@{pipeline().parameters.sqlLinkedServiceName}",
+            "type": "LinkedServiceReference"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "sourcePath": {
+        "type": "String",
+        "defaultValue": "raw-data/sales/"
+      },
+      "sinkTable": {
+        "type": "String",
+        "defaultValue": "staging.sales_data"
+      },
+      "sourceDatasetName": {
+        "type": "String",
+        "defaultValue": "BlobStorageSourceDataset"
+      },
+      "sinkDatasetName": {
+        "type": "String",
+        "defaultValue": "SqlDatabaseSinkDataset"
+      },
+      "sqlLinkedServiceName": {
+        "type": "String",
+        "defaultValue": "AzureSqlDatabaseLinkedService"
+      }
+    },
+    "annotations": [
+      "auto-generated",
+      "copy-pipeline",
+      "sales-ingestion",
+      "blob-to-sql"
+    ],
+    "folder": {
+      "name": "generated"
+    }
+  }
+}
