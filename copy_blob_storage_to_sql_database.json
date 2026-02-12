@@ -1,0 +1,167 @@
+{
+  "name": "copy_blob_storage_to_sql_database",
+  "properties": {
+    "description": "Copy CSV files from Azure Blob Storage (raw-data/sales/) to Azure SQL Database staging table (staging.sales_data). Runs daily at 2:00 AM UTC with pre-copy truncation.",
+    "activities": [
+      {
+        "name": "CopySalesDataFromBlobToSQL",
+        "type": "Copy",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 3,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "source": {
+            "type": "DelimitedTextSource",
+            "storeSettings": {
+              "type": "AzureBlobStorageReadSettings",
+              "recursive": false,
+              "wildcardFolderPath": "@{parameters('sourceFolderPath')}",
+              "wildcardFileName": "@{parameters('sourceFilePattern')}",
+              "enablePartitionDiscovery": false
+            },
+            "formatSettings": {
+              "type": "DelimitedTextReadSettings",
+              "skipLineCount": 0,
+              "firstRowAsHeader": true
+            }
+          },
+          "sink": {
+            "type": "SqlSink",
+            "preCopyScript": "@{concat('TRUNCATE TABLE ', parameters('sinkSchema'), '.', parameters('sinkTable'))}",
+            "writeBatchSize": 10000,
+            "writeBatchTimeout": "00:30:00",
+            "sqlWriterUseTableLock": false,
+            "tableOption": "autoCreate"
+          },
+          "enableStaging": false,
+          "translator": {
+            "type": "TabularTranslator",
+            "typeConversion": true,
+            "typeConversionSettings": {
+              "allowDataTruncation": true,
+              "treatBooleanAsNumber": false
+            }
+          }
+        },
+        "inputs": [
+          {
+            "referenceName": "@{parameters('sourceDataset')}",
+            "type": "DatasetReference",
+            "parameters": {
+              "folderPath": "@{parameters('sourceFolderPath')}",
+              "fileName": "@{parameters('sourceFilePattern')}"
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "referenceName": "@{parameters('sinkDataset')}",
+            "type": "DatasetReference",
+            "parameters": {
+              "schemaName": "@{parameters('sinkSchema')}",
+              "tableName": "@{parameters('sinkTable')}"
+            }
+          }
+        ]
+      },
+      {
+        "name": "LogPipelineRunStatus",
+        "type": "SqlServerStoredProcedure",
+        "dependsOn": [
+          {
+            "activity": "CopySalesDataFromBlobToSQL",
+            "dependencyConditions": ["Succeeded", "Failed"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:05:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "storedProcedureName": "@{parameters('loggingStoredProcedure')}",
+          "storedProcedureParameters": {
+            "PipelineName": {
+              "value": "@{pipeline().Pipeline}",
+              "type": "String"
+            },
+            "RunId": {
+              "value": "@{pipeline().RunId}",
+              "type": "String"
+            },
+            "Status": {
+              "value": "@{activity('CopySalesDataFromBlobToSQL').Status}",
+              "type": "String"
+            },
+            "RowsCopied": {
+              "value": "@{activity('CopySalesDataFromBlobToSQL').output.rowsCopied}",
+              "type": "Int32"
+            },
+            "ExecutionTime": {
+              "value": "@{activity('CopySalesDataFromBlobToSQL').output.executionDetails[0].duration}",
+              "type": "Int32"
+            },
+            "Timestamp": {
+              "value": "@{utcnow()}",
+              "type": "DateTime"
+            }
+          }
+        },
+        "linkedServiceName": {
+          "referenceName": "@{parameters('sinkLinkedService')}",
+          "type": "LinkedServiceReference"
+        }
+      }
+    ],
+    "parameters": {
+      "sourceDataset": {
+        "type": "String",
+        "defaultValue": "BlobStorageCsvDataset"
+      },
+      "sinkDataset": {
+        "type": "String",
+        "defaultValue": "SqlDatabaseDataset"
+      },
+      "sourceFolderPath": {
+        "type": "String",
+        "defaultValue": "raw-data/sales/"
+      },
+      "sourceFilePattern": {
+        "type": "String",
+        "defaultValue": "sales_*.csv"
+      },
+      "sinkSchema": {
+        "type": "String",
+        "defaultValue": "staging"
+      },
+      "sinkTable": {
+        "type": "String",
+        "defaultValue": "sales_data"
+      },
+      "sinkLinkedService": {
+        "type": "String",
+        "defaultValue": "AzureSqlDatabaseLinkedService"
+      },
+      "loggingStoredProcedure": {
+        "type": "String",
+        "defaultValue": "monitoring.LogPipelineRun"
+      }
+    },
+    "annotations": [
+      "auto-generated",
+      "sales-data-ingestion",
+      "blob-to-sql",
+      "daily-schedule"
+    ],
+    "folder": {
+      "name": "generated"
+    }
+  }
+}
