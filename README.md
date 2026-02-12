@@ -144,6 +144,9 @@ The repository includes four GitHub Actions workflows that orchestrate this flow
 | **PR Review Assignment** | `.github/workflows/assign-adf-review-agent.yml` | Detects `adf-pipeline` PR → Assigns Copilot with review agent |
 | **Review Handoff** | `.github/workflows/handle-adf-review-results.yml` | Parses review comment → Routes back to generation agent (if errors) or approves |
 | **Escalation** | `.github/workflows/escalate-to-human-review.yml` | After 3 cycles → Adds `needs-human-review` label and alerts maintainers |
+| **Auto-Approve** | `.github/workflows/auto-approve-copilot-runs.yml` | Automatically approves workflow runs triggered by Copilot (see note below) |
+
+> **Note on Auto-Approval:** GitHub requires manual approval for workflows triggered by bot accounts, including Copilot. This is a [known platform limitation](https://github.com/orgs/community/discussions/162826). The `auto-approve-copilot-runs.yml` workflow uses the GitHub API to programmatically approve these runs, enabling fully automatic agent-to-agent handoffs.
 
 > **Note:** Assignment workflows use `concurrency` groups to prevent duplicate agent sessions when multiple events fire simultaneously (e.g., issue created with label already applied).
 
@@ -181,7 +184,8 @@ mutation {
 │       ├── assign-adf-generate-agent.yml      # Trigger generation agent
 │       ├── assign-adf-review-agent.yml        # Trigger review agent
 │       ├── handle-adf-review-results.yml      # Handoff coordination
-│       └── escalate-to-human-review.yml       # Escalation after max retries
+│       ├── escalate-to-human-review.yml       # Escalation after max retries
+│       └── auto-approve-copilot-runs.yml      # Auto-approve Copilot workflow runs
 ├── templates/                 # ADF pipeline JSON templates
 │   ├── copy_activity.json
 │   └── dataflow_activity.json
@@ -285,6 +289,7 @@ The default `GITHUB_TOKEN` in GitHub Actions workflows does **not** have permiss
    - **Expiration:** 90 days (or your preference)
    - **Repository access:** Select **"Only select repositories"** → choose your repository
    - **Permissions:**
+     - Repository permissions → **Actions:** Read and write *(required for auto-approving Copilot workflow runs)*
      - Repository permissions → **Contents:** Read and write
      - Repository permissions → **Issues:** Read and write  
      - Repository permissions → **Pull requests:** Read and write
@@ -306,6 +311,7 @@ The GraphQL API mutation `addAssigneesToAssignable` with `agentAssignment` requi
 - Permission to assign Copilot to issues/PRs
 - Permission to specify the custom agent to use
 - Permission to pass custom instructions to the agent
+- Permission to auto-approve workflow runs triggered by Copilot (see [Known Limitation](#known-limitation-workflow-approval))
 
 Without the PAT, workflows will still run but will fail to assign Copilot automatically. They will post instructions guiding you to manually open the issue/PR in Copilot Workspace instead.
 
@@ -472,12 +478,33 @@ Findings are categorized as **error** (blocks approval), **warning** (approved w
 
 ---
 
+## Known Limitation: Workflow Approval
+
+GitHub requires manual approval for workflows triggered by bot accounts, including the Copilot coding agent (`copilot-swe-agent[bot]`). This is a [known platform limitation](https://github.com/orgs/community/discussions/162826) with no official workaround—it applies regardless of:
+- Trigger type (`pull_request`, `pull_request_target`, `workflow_run`)
+- Repository settings ("Require approval for first-time contributors")
+- Whether the branch is in the same repo vs. a fork
+
+**How this repository solves it:**
+
+The `auto-approve-copilot-runs.yml` workflow automatically approves workflow runs triggered by Copilot:
+1. Triggers when a workflow enters `action_required` status
+2. Verifies the actor is `copilot-swe-agent[bot]`
+3. Calls the GitHub API to approve the run
+
+This enables fully automatic agent-to-agent handoffs without manual intervention.
+
+**Security note:** This workflow only approves runs from the official Copilot bot for specific workflows in this repository. The `COPILOT_PAT` secret requires `Actions: Read and write` permission.
+
+---
+
 ## Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
 | **Workflow runs but Copilot isn't assigned** | The `COPILOT_PAT` secret is missing or invalid. See [Step 4](#step-4-create-personal-access-token-required) to create and configure it. |
-| **GraphQL error: "target repository is not writable"** | The PAT doesn't have correct permissions. Ensure it has `Contents`, `Issues`, and `Pull requests` read/write access. |
+| **Workflows waiting for approval** | Ensure `COPILOT_PAT` has `Actions: Read and write` permission. See [Known Limitation](#known-limitation-workflow-approval). |
+| **GraphQL error: "target repository is not writable"** | The PAT doesn't have correct permissions. Ensure it has `Actions`, `Contents`, `Issues`, and `Pull requests` read/write access. |
 | **Copilot doesn't use the agent instructions** | Make sure the `.github/agents/` directory is on the default branch. Verify Copilot Coding Agent is enabled for the repo. |
 | **Copilot isn't available as an assignee** | Confirm your org/plan has Copilot Coding Agent enabled. Check organization Copilot policies. |
 | **Review/fix cycle runs too long** | The workflows enforce a maximum of 3 review cycles before escalating to `needs-human-review`. |
