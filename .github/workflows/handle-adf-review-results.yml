@@ -127,7 +127,8 @@ jobs:
       - name: Re-assign Generation Agent via GraphQL API
         if: steps.review-findings.outputs.has_errors == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Use COPILOT_PAT if available (required for Copilot assignment), otherwise fall back to GITHUB_TOKEN
+          GH_TOKEN: ${{ secrets.COPILOT_PAT || secrets.GITHUB_TOKEN }}
           PR_NODE_ID: ${{ github.event.issue.node_id }}
           REPO_NODE_ID: ${{ github.event.repository.node_id }}
         run: |

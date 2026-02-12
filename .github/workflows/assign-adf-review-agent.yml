@@ -90,7 +90,8 @@ jobs:
       - name: Assign Copilot with ADF Review Agent via GraphQL
         if: steps.check-review.outputs.already_reviewed == 'false'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Use COPILOT_PAT if available (required for Copilot assignment), otherwise fall back to GITHUB_TOKEN
+          GH_TOKEN: ${{ secrets.COPILOT_PAT || secrets.GITHUB_TOKEN }}
           PR_NODE_ID: ${{ github.event.pull_request.node_id }}
           REPO_NODE_ID: ${{ github.event.repository.node_id }}
         run: |

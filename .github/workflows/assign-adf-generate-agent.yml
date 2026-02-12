@@ -59,7 +59,8 @@ jobs:
       - name: Assign Copilot with ADF Generate Agent via GraphQL
         if: steps.check-assigned.outputs.already_assigned == 'false'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Use COPILOT_PAT if available (required for Copilot assignment), otherwise fall back to GITHUB_TOKEN
+          GH_TOKEN: ${{ secrets.COPILOT_PAT || secrets.GITHUB_TOKEN }}
           ISSUE_NODE_ID: ${{ github.event.issue.node_id }}
           REPO_NODE_ID: ${{ github.event.repository.node_id }}
         run: |
