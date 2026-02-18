@@ -23,6 +23,7 @@ Issue defines the work to be done (e.g., "Create ADF pipeline to copy from Blob 
 - This repo is not about the specific ADF pipelines, or the custom agents themselves - but is intended to be a technical proof, education tool, and reference example for orchestrating custom agents through Coding Agent based on current capabilities and limitations. 
 - The patterns and best practices demonstrated here can be applied to orchestrating agents for any use case, not just ADF.
 - All documentation should be written as educational content for users who want to learn how to implement similar patterns in their own repos
+- The solution must actually run and work end to end - so it cannot include any mocked up or fake tools or resources that would cause the solution to fail when tested
 
 ## Branch and PR Policy
 
