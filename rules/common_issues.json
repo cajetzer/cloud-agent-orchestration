@@ -1,0 +1,205 @@
+{
+  "version": "1.0",
+  "description": "Common ADF issues and their resolutions for the review agent knowledge base",
+  "issues": {
+    "KB-001": {
+      "name": "Missing Retry Policy",
+      "pattern": "activity without policy.retry",
+      "severity": "warning",
+      "description": "Activities without retry policies will fail permanently on transient errors",
+      "resolution": "Add a policy block with retry: 3 and retryIntervalInSeconds: 30",
+      "example_fix": {
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 3,
+          "retryIntervalInSeconds": 30
+        }
+      }
+    },
+    "KB-002": {
+      "name": "Hardcoded Connection String",
+      "pattern": "typeProperties containing Server= or Data Source=",
+      "severity": "error",
+      "description": "Hardcoded connection strings prevent environment promotion and expose configuration",
+      "resolution": "Move connection details to linked service and use parameters for environment-specific values",
+      "example_fix": "Use @linkedService('MyLinkedService') with parameters"
+    },
+    "KB-003": {
+      "name": "Excessive Timeout",
+      "pattern": "timeout > 7.00:00:00",
+      "severity": "error",
+      "description": "ADF maximum timeout is 7 days. Exceeding this will cause validation errors",
+      "resolution": "Set timeout to 7.00:00:00 or less. For longer operations, implement checkpointing"
+    },
+    "KB-010": {
+      "name": "Small File Iteration Anti-Pattern",
+      "pattern": "ForEach activity with GetMetadata + Copy for files",
+      "severity": "warning",
+      "description": "Iterating over many small files with ForEach is inefficient due to API overhead per file",
+      "resolution": "Use wildcard file paths with enablePartitionDiscovery for bulk copy operations",
+      "details": "Each Copy activity invocation has ~2-3 second overhead. For 1000 files, this adds 30-50 minutes vs seconds for bulk copy",
+      "example_fix": {
+        "source": {
+          "type": "BlobSource",
+          "wildcardFileName": "*.csv",
+          "enablePartitionDiscovery": true
+        }
+      }
+    },
+    "KB-011": {
+      "name": "Missing Error Row Handling",
+      "pattern": "Copy activity without enableSkipIncompatibleRow or redirectIncompatibleRowSettings",
+      "severity": "info",
+      "description": "Copy activities fail entirely on bad rows unless error handling is configured",
+      "resolution": "Consider adding redirectIncompatibleRowSettings to capture bad rows for analysis",
+      "example_fix": {
+        "typeProperties": {
+          "enableSkipIncompatibleRow": true,
+          "redirectIncompatibleRowSettings": {
+            "linkedServiceName": {
+              "referenceName": "ErrorLogStorage",
+              "type": "LinkedServiceReference"
+            },
+            "path": "errors"
+          }
+        }
+      }
+    },
+    "KB-012": {
+      "name": "Unpartitioned Large Table Copy",
+      "pattern": "Copy from SQL without partition option for tables > 1M rows",
+      "severity": "warning",
+      "description": "Copying large tables without partitioning is slow and may timeout",
+      "resolution": "Enable parallel copy with partitionOption and appropriate partitionSettings",
+      "example_fix": {
+        "source": {
+          "type": "SqlSource",
+          "partitionOption": "DynamicRange",
+          "partitionSettings": {
+            "partitionColumnName": "ModifiedDate",
+            "partitionUpperBound": "@pipeline().parameters.EndDate",
+            "partitionLowerBound": "@pipeline().parameters.StartDate"
+          }
+        }
+      }
+    },
+    "KB-020": {
+      "name": "Plaintext Secret in Pipeline",
+      "pattern": "password, apikey, secret, token in plain text",
+      "severity": "error",
+      "description": "Secrets in pipeline JSON are visible in monitoring and logs",
+      "resolution": "Use Azure Key Vault linked service with secret references",
+      "example_fix": {
+        "password": {
+          "type": "AzureKeyVaultSecret",
+          "store": {
+            "referenceName": "KeyVaultLinkedService",
+            "type": "LinkedServiceReference"
+          },
+          "secretName": "MySecretName"
+        }
+      }
+    },
+    "KB-021": {
+      "name": "Missing SecureInput on Web Activity",
+      "pattern": "WebActivity without secureInput: true when body contains credentials",
+      "severity": "warning",
+      "description": "Web activity inputs are logged unless secureInput is enabled",
+      "resolution": "Set secureInput: true in the activity policy when passing sensitive data",
+      "example_fix": {
+        "policy": {
+          "secureInput": true,
+          "secureOutput": true
+        }
+      }
+    },
+    "KB-030": {
+      "name": "Data Flow Without Compute Optimization",
+      "pattern": "ExecuteDataFlow without compute.coreCount or computeType specified",
+      "severity": "info",
+      "description": "Default compute settings may not be optimal for your workload",
+      "resolution": "Specify computeType (General/MemoryOptimized/ComputeOptimized) and coreCount based on data volume",
+      "example_fix": {
+        "compute": {
+          "computeType": "General",
+          "coreCount": 8
+        }
+      }
+    },
+    "KB-031": {
+      "name": "Data Flow Without Staging",
+      "pattern": "ExecuteDataFlow with PolyBase sink without staging configured",
+      "severity": "warning",
+      "description": "PolyBase sinks require staging storage for optimal performance",
+      "resolution": "Configure staging linked service and enable staging",
+      "example_fix": {
+        "staging": {
+          "linkedService": {
+            "referenceName": "StagingStorage",
+            "type": "LinkedServiceReference"
+          },
+          "folderPath": "staging"
+        }
+      }
+    },
+    "KB-040": {
+      "name": "Unbounded ForEach",
+      "pattern": "ForEach without isSequential and batchCount > 20",
+      "severity": "warning",
+      "description": "Large parallel ForEach can overwhelm downstream systems and hit API limits",
+      "resolution": "Set batchCount appropriate to downstream system capacity (typically 10-20)",
+      "example_fix": {
+        "typeProperties": {
+          "isSequential": false,
+          "batchCount": 20,
+          "items": "@activity('GetItems').output.value"
+        }
+      }
+    },
+    "KB-041": {
+      "name": "Missing Pipeline Parameters",
+      "pattern": "Pipeline without parameters section",
+      "severity": "warning",
+      "description": "Pipelines without parameters are not reusable across environments",
+      "resolution": "Define parameters for all environment-specific values (connections, paths, dates)",
+      "example_fix": {
+        "parameters": {
+          "SourceContainer": {
+            "type": "string",
+            "defaultValue": "raw-data"
+          },
+          "SinkSchema": {
+            "type": "string",
+            "defaultValue": "dbo"
+          },
+          "ProcessDate": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "antipatterns": [
+    {
+      "id": "AP-001",
+      "name": "Nested ForEach",
+      "description": "ForEach inside ForEach creates exponential complexity",
+      "detection": "ForEach activity containing another ForEach",
+      "recommendation": "Flatten data structure or use Data Flow for complex transformations"
+    },
+    {
+      "id": "AP-002", 
+      "name": "Copy-Transform-Copy",
+      "description": "Using intermediate storage between simple transformations",
+      "detection": "Copy → Data Flow → Copy pattern with same source/sink types",
+      "recommendation": "Use Data Flow source/sink directly or Copy with column mapping"
+    },
+    {
+      "id": "AP-003",
+      "name": "Polling Wait Loop",
+      "description": "Using Wait + Until to poll for external events",
+      "detection": "Until loop containing Wait activity checking external status",
+      "recommendation": "Use event-based triggers or webhook activities instead"
+    }
+  ]
+}
