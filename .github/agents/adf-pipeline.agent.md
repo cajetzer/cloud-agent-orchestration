@@ -87,32 +87,33 @@ Before committing, review your generated pipeline against the rules in `rules/be
 
 #### Fix Any Issues Found
 
-If you find issues during self-review, fix them immediately before proceeding. Do not open a PR with known issues.
+If you find issues during self-review, fix them immediately before finalizing. Do not mark the PR ready with known issues.
 
 ---
 
-### Phase 3: Open Pull Request
+### Phase 3: Finalize and Request Review
 
-#### 3.1 Create Branch and Commit
+> **Note:** Copilot coding agent automatically creates a draft PR when you start working. You do NOT need to create a new PR. Work within the existing draft PR.
 
-- Create a branch named `adf-pipeline/<issue-number>-<pipeline-name>`
+#### 3.1 Commit the Pipeline
+
 - Commit the pipeline JSON to `pipelines/<pipeline-name>.json`
+- Use a clear commit message describing what was generated
 
-#### 3.2 Open the PR
+#### 3.2 Update the PR Description
 
-Open a PR with:
+Update the existing draft PR description to include:
 
-- Title: `[ADF Pipeline] <descriptive name>`
-- Body that includes:
-  - `Resolves #<issue-number>`
-  - Summary of the pipeline's purpose
-  - Self-review checklist showing what you verified
-  - The full pipeline JSON in a code block for easy review
-- Label: `adf-pipeline`
+- `Resolves #<issue-number>`
+- Summary of the pipeline's purpose
+- Self-review checklist showing what you verified
+- The full pipeline JSON in a code block for easy review
+
+Add the label `adf-pipeline` to the PR.
 
 #### 3.3 Post Summary Comment
 
-After opening the PR, add a comment summarizing your work:
+Add a comment on the PR summarizing your work:
 
 ```markdown
 ## 🔍 Pipeline Generation & Self-Review Complete
@@ -136,6 +137,10 @@ This pipeline has been automatically generated and self-reviewed against ADF bes
 A human reviewer should verify business logic and approve for merge.
 ```
 
+#### 3.4 Mark Ready for Review
+
+Once complete, mark the draft PR as ready for review.
+
 ---
 
 ## General Rules
@@ -146,3 +151,4 @@ A human reviewer should verify business logic and approve for merge.
 - If the request is ambiguous, make reasonable assumptions and note them in the PR description
 - Be thorough in self-review — catch issues before a human reviewer needs to
 - If you cannot resolve an issue, explain it in the PR and add label `needs-human-review`
+- **Work within the existing draft PR** — do not create additional PRs
