@@ -1,6 +1,6 @@
 # Copilot Instructions for Cloud Agent Orchestration
 
-This repository demonstrates GitHub Copilot Coding Agent orchestration using custom agents and GitHub Actions workflows. There is no application code—only agent definitions, workflow YAML, JSON templates/rules, and documentation.
+This repository demonstrates GitHub Copilot Coding Agent orchestration of custom sub-agents defined in agent.md files. There is no application code—only agent definitions, JSON templates/rules, documentation, and maybe workflow YAML depending on implementation. The focus is on showcasing how to structure agent instructions and orchestrate them through Coding Agent in the cloud using the latest capabilities patterns and best practices. The solution will change over time as the product and industry changes quickly. 
 
 ## Architecture Overview
 
@@ -11,82 +11,39 @@ This repository demonstrates GitHub Copilot Coding Agent orchestration using cus
 
 **Orchestration flow:**
 ```
-Issue + "adf-generate" label
-  → assign-adf-generate-agent.yml (assigns Copilot via GraphQL)
-  → Agent generates pipeline, opens PR with "adf-pipeline" label
-  → assign-adf-review-agent.yml (assigns review agent)
-  → Review agent posts findings
-  → handle-adf-review-results.yml (routes: fix cycle or approve)
-  → After 3 failed cycles → escalate-to-human-review.yml
+Issue defines the work to be done (e.g., "Create ADF pipeline to copy from Blob to SQL")
+  → assign to adf-generate agent to do the initial work
+  → when complete, hand off to adf-review agent for review and research for solutions to any issues found
+  → hand back to adf-generate agent to fix issues
+  → repeat cycle until review agent approves or 3 cycles are completed
+  → After 3 failed cycles, escalate to human review with all context and agent findings
 ```
 
 **Key concepts:**
-- Workflows use GraphQL API with `agentAssignment` to assign Copilot with specific custom agents
-- Labels track state (`agent-in-progress`, `retry-count-N`, `approved`, `changes-requested`)
-- `COPILOT_PAT` secret required for automated assignment (standard `GITHUB_TOKEN` lacks permission)
-
-## Key Files
-
-| Path | Purpose |
-|------|---------|
-| `.github/agents/*.agent.md` | Custom agent definitions (activation conditions, step-by-step instructions) |
-| `.github/workflows/*.yml` | Orchestration workflows (event triggers, GraphQL calls, state management) |
-| `templates/*.json` | ADF pipeline JSON templates (Copy, Data Flow) |
-| `rules/best_practices.json` | Review rules (retry policies, naming, security, parameterization) |
+- This repo is not about the specific ADF pipelines, or the custom agents themselves - but is intended to be a technical proof, education tool, and reference example for orchestrating custom agents through Coding Agent based on current capabilities and limitations. 
+- The patterns and best practices demonstrated here can be applied to orchestrating agents for any use case, not just ADF.
+- All documentation should be written as educational content for users who want to learn how to implement similar patterns in their own repos
+- The solution must actually run and work end to end - so it cannot include any mocked up or fake tools or resources that would cause the solution to fail when tested
 
 ## Branch and PR Policy
 
 **Never commit directly to `main`.** All changes must be made on a feature branch and submitted via pull request.
 
 When making changes:
-1. Create a new branch with a descriptive name (e.g., `fix/issue-description`, `feature/new-capability`)
+1. If not already in a feature branch, create a new branch with a descriptive name (e.g., `fix/issue-description`, `feature/new-capability`)
 2. Commit changes to the feature branch
-3. Push the branch and create a pull request
-4. Wait for review/approval before merging
+3. Push the branch and wait for review and approval before creating a Pull Request
+4. Never merge your own PR. This will always be done by a human after review.
 
 ## Conventions
 
-### Agent Definition Structure
-Agent files use YAML frontmatter + markdown body:
-```markdown
----
-name: Agent Name
-description: What it does
-tools: ["read", "edit", "search"]
----
-# Agent Name
-## When to Activate
-## Instructions
-```
+- no conventions in this repo should be considered gold-standard or best practices. 
+- always check the latest documentation and best practices when making changes, suggesting updates to any existing conventions or patterns as needed to reflect the current state of the art in agent orchestration and Coding Agent capabilities.
 
-### Pipeline JSON Requirements
-Generated pipelines must include:
-- `name`, `properties.description`, `annotations`, `folder`
-- `policy` block on activities (retry 1-5, explicit timeout ≤ 7 days)
-- Parameterized values—never hardcode connection strings, paths, or credentials
-- `secureInput`/`secureOutput` on credential-handling activities
+## Development Workflow
 
-### Label Conventions
-- Trigger labels: `adf-generate`, `adf-pipeline`
-- Status: `agent-in-progress`, `review-in-progress`, `approved`, `changes-requested`
-- Retry tracking: `retry-count-1`, `retry-count-2`, `retry-count-3`
-- Escalation: `needs-human-review`, `escalated`
-
-## GraphQL Agent Assignment Pattern
-
-Workflows assign Copilot using this mutation structure:
-```graphql
-mutation {
-  addAssigneesToAssignable(input: {
-    assignableId: "<ISSUE_OR_PR_NODE_ID>",
-    assigneeIds: ["<COPILOT_BOT_ID>"],
-    agentAssignment: {
-      targetRepositoryId: "<REPO_NODE_ID>",
-      baseRef: "main",
-      customAgent: "adf-generate",
-      customInstructions: "..."
-    }
-  }) { ... }
-}
-```
-Requires feature flags: `issues_copilot_assignment_api_support`, `coding_agent_model_selection`
+1. when asked to make a change, first determine if this is a simple change that should follow existing conventions and patterns in the repo, or if the research should be done to stay up to date with the latest best practices and capabilities.
+2. if the change is simple and follows existing patterns, make the change in a feature branch
+3. if the change is more complex or requires research, first do the research to determine the best approach based on the latest documentation and best practices, sharing your findings and asking if a refactor is desired
+4. if a refactor is desired, create a new feature branch and implement the change, ensuring to update any relevant documentation and conventions in the repo to reflect the new approach.
+5. Always review your work for mistakes and expected functionality before saying your work is complete. Run automated tests where possible to ensure the solution works as expected. If you find any issues during testing, fix them before saying your work is complete
