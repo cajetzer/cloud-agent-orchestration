@@ -38,3 +38,11 @@ When making changes:
 
 - no conventions in this repo should be considered gold-standard or best practices. 
 - always check the latest documentation and best practices when making changes, suggesting updates to any existing conventions or patterns as needed to reflect the current state of the art in agent orchestration and Coding Agent capabilities.
+
+## Workflow
+
+1. when asked to make a change, first determine if this is a simple change that should follow existing conventions and patterns in the repo, or if the research should be done to stay up to date with the latest best practices and capabilities.
+2. if the change is simple and follows existing patterns, make the change in a feature branch
+3. if the change is more complex or requires research, first do the research to determine the best approach based on the latest documentation and best practices, sharing your findings and asking if a refactor is desired
+4. if a refactor is desired, create a new feature branch and implement the change, ensuring to update any relevant documentation and conventions in the repo to reflect the new approach.
+5. Always review your work for mistakes and expected functionality before saying your work is complete. Run automated tests where possible to ensure the solution works as expected. If you find any issues during testing, fix them before saying your work is complete
