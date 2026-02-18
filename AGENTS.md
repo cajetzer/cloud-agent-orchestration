@@ -26,8 +26,9 @@ This repository contains no application code. It contains:
 | Directory | Purpose |
 |-----------|---------|
 | `.github/workflows/` | Agentic workflow markdown files |
+| `.github/agents/` | Custom agent definitions (can be assigned manually via Copilot UI) |
 | `templates/` | ADF pipeline JSON templates |
-| `rules/` | Best practices rules for validation |
+| `rules/` | Best practices rules and knowledge base |
 | `pipelines/` | Generated pipelines (created by workflow) |
 | `examples/` | Sample issues and expected outputs |
 
