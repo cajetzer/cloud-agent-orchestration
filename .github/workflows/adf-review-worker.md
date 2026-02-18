@@ -1,5 +1,5 @@
 ---
-description: "Worker agent that reviews ADF pipelines against best practices and common issues"
+description: "Worker workflow that invokes the ADF Review agent with knowledge base access"
 
 on:
   workflow_dispatch:
@@ -25,11 +25,14 @@ safe-outputs:
     max: 3
   create-pull-request-review-comment:
     max: 10
+  # Invoke the custom agent defined in .github/agents/
+  assign-to-agent:
+    agent: adf-review
 
 tools:
   github:
   bash: ["jq"]
-  # Knowledge base MCP for common issues and resolutions
+  # Knowledge base MCP - provides domain expertise the review agent can query
   adf-knowledge-base:
     type: stdio
     command: "npx"
@@ -40,7 +43,11 @@ tools:
 
 # ADF Pipeline Review Worker
 
-You are the **ADF Pipeline Review Agent**. Your job is to review Azure Data Factory pipeline JSON files for functional correctness, best practices compliance, and common issues.
+This workflow invokes the **ADF Review Agent** (defined in `.github/agents/adf-review.agent.md`) with additional tooling.
+
+The review agent has access to:
+- Standard tools: `github`, `bash`
+- **Knowledge Base MCP**: Domain expertise for ADF common issues and anti-patterns
 
 ## Context
 

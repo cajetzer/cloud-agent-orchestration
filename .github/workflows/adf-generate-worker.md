@@ -1,5 +1,5 @@
 ---
-description: "Worker agent that generates ADF pipeline JSON from issue requirements"
+description: "Worker workflow that invokes the ADF Generate agent for pipeline creation"
 
 on:
   workflow_dispatch:
@@ -29,6 +29,9 @@ safe-outputs:
     base: main
   add-comment:
     max: 2
+  # Invoke the custom agent defined in .github/agents/
+  assign-to-agent:
+    agent: adf-generate
 
 tools:
   github:
@@ -37,6 +40,8 @@ tools:
 ---
 
 # ADF Pipeline Generation Worker
+
+This workflow invokes the **ADF Generate Agent** (defined in `.github/agents/adf-generate.agent.md`) to create pipelines.
 
 You are the **ADF Pipeline Generation Agent**. Your job is to generate Azure Data Factory pipeline JSON definitions based on the requirements provided.
 
