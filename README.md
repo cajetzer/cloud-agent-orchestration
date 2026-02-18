@@ -138,19 +138,42 @@ tools:
 | **Extensibility** | Modify one big agent | Add new workers easily |
 | **Security** | Broad permissions | Scoped permissions per worker |
 
-### The Review Worker's Knowledge Base
+### The Review Agent's Knowledge Base
 
-The review worker has access to `adf-knowledge-base` MCP server:
+The review agent reads `rules/common_issues.json` for domain expertise:
 
-```markdown
-## Available Knowledge Base Queries
-
-- `search_issues(pattern)` - Find known issues matching a pattern
-- `get_resolution(issue_id)` - Get recommended fix
-- `check_antipatterns(pipeline_json)` - Scan for anti-patterns
+```json
+{
+  "issues": {
+    "KB-010": {
+      "name": "Small File Iteration Anti-Pattern",
+      "severity": "warning",
+      "resolution": "Use wildcard file paths with bulk copy"
+    }
+  }
+}
 ```
 
-This provides domain expertise that the generation agent doesn't need.
+**In production**, this could be enhanced with:
+
+| Approach | Implementation | Best For |
+|----------|---------------|----------|
+| **JSON file** (current) | Read file directly | Simple, version-controlled knowledge |
+| **MCP Server** | Custom server with `tools:` config | Complex queries, real-time data |
+| **Vector Database** | MCP server + embeddings | Semantic search over large KB |
+| **External API** | `web-fetch` tool | Enterprise knowledge base integration |
+| **Azure AI Search** | MCP server + Azure SDK | Enterprise search with AI ranking |
+
+Example MCP configuration (for production):
+```yaml
+tools:
+  knowledge-base:
+    type: stdio
+    command: "node"
+    args: ["./mcp-servers/kb-server.js"]
+    env:
+      KB_CONNECTION_STRING: ${{ secrets.KB_CONNECTION }}
+```
 
 ---
 

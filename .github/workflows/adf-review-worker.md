@@ -31,23 +31,21 @@ safe-outputs:
 
 tools:
   github:
-  bash: ["jq"]
-  # Knowledge base MCP - provides domain expertise the review agent can query
-  adf-knowledge-base:
-    type: stdio
-    command: "npx"
-    args: ["-y", "@adf-tools/knowledge-base-mcp"]
-    env:
-      KNOWLEDGE_BASE_PATH: "./rules/common_issues.json"
+  bash: ["jq", "cat"]
+  # The agent reads rules/common_issues.json directly for knowledge base lookups
+  # In production, this could be replaced with:
+  # - An MCP server connected to a vector database
+  # - A web-fetch call to a knowledge base API
+  # - An Azure AI Search or similar service
 ---
 
 # ADF Pipeline Review Worker
 
-This workflow invokes the **ADF Review Agent** (defined in `.github/agents/adf-review.agent.md`) with additional tooling.
+This workflow invokes the **ADF Review Agent** (defined in `.github/agents/adf-review.agent.md`).
 
 The review agent has access to:
 - Standard tools: `github`, `bash`
-- **Knowledge Base MCP**: Domain expertise for ADF common issues and anti-patterns
+- **Knowledge Base**: Read `rules/common_issues.json` for common ADF issues and resolutions
 
 ## Context
 
@@ -55,15 +53,28 @@ You are being invoked by the orchestrator with:
 - PR number: `${{ inputs.pr_number }}`
 - Original issue: `${{ inputs.issue_number }}`
 
-## Available Tools
+## Available Resources
 
-You have access to specialized tools:
+You have access to:
 
-1. **github** - Read PR files, post comments, access repository content
-2. **adf-knowledge-base** - Query common ADF issues and their resolutions:
-   - `search_issues(pattern)` - Find known issues matching a pattern
-   - `get_resolution(issue_id)` - Get recommended fix for an issue
-   - `check_antipatterns(pipeline_json)` - Scan for known anti-patterns
+1. **github** tool - Read PR files, post comments, access repository content
+2. **bash** tool - Run `jq` and `cat` commands to parse JSON
+3. **Knowledge Base** - Read `rules/common_issues.json` for known issues and resolutions
+
+### Using the Knowledge Base
+
+Read and parse `rules/common_issues.json` to check for known issues:
+
+```bash
+# Read the knowledge base
+cat rules/common_issues.json | jq '.issues'
+
+# Search for specific issue
+cat rules/common_issues.json | jq '.issues["KB-010"]'
+
+# Get all anti-patterns
+cat rules/common_issues.json | jq '.antipatterns'
+```
 
 ## Phase 1: Gather Context
 
@@ -77,6 +88,8 @@ You have access to specialized tools:
 3. Read each `.json` file under `pipelines/` directory
 
 4. Read the best practices rules from `rules/best_practices.json`
+
+5. Read the knowledge base from `rules/common_issues.json`
 
 ## Phase 2: Review Pipeline
 
@@ -130,23 +143,24 @@ For each pipeline JSON file, perform these checks. Classify findings as:
 
 ### Knowledge Base Checks
 
-Use the `adf-knowledge-base` tool to check for known issues:
+Read `rules/common_issues.json` to check for known issues and anti-patterns:
 
-```
-# Check for anti-patterns
-antipatterns = adf-knowledge-base.check_antipatterns(pipeline_json)
-
-# For each finding, get resolution
-for pattern in antipatterns:
-    resolution = adf-knowledge-base.get_resolution(pattern.issue_id)
+```bash
+# Load and check against known issues
+cat rules/common_issues.json | jq '.issues | keys[]'
 ```
 
-Common issues the knowledge base can identify:
-- Inefficient copy patterns (small file many iterations vs bulk)
-- Missing error handling for transient failures
-- Suboptimal data flow configurations
-- Connection pooling issues
-- Partition strategy problems
+Common issues to check (from knowledge base):
+- **KB-010**: Small file iteration anti-pattern
+- **KB-011**: Missing error row handling  
+- **KB-012**: Unpartitioned large table copy
+- **KB-020**: Plaintext secrets in pipeline
+- **KB-021**: Missing secureInput on web activities
+- **KB-030**: Data flow without compute optimization
+- **KB-040**: Unbounded ForEach
+- **KB-041**: Missing pipeline parameters
+
+For each issue found, include the KB reference and resolution in your review.
 
 ## Phase 3: Post Review Results
 
