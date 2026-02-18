@@ -89,37 +89,41 @@ See [Detailed Setup Instructions](#detailed-setup-instructions) below for step-b
 
 ## Architecture
 
-```
-Issue created + labeled "adf-generate"
-  │
-  └─ Workflow: assign-adf-generate-agent.yml
-     │
-     └─ GraphQL API: Assign Copilot with customAgent: "adf-generate"
-        │
-        └─ Copilot with ADF Generate Agent starts automatically
-           ├─ Reads issue requirements
-           ├─ Generates ADF pipeline JSON
-           └─ Opens PR with label "adf-pipeline"
-              │
-              └─ Workflow: assign-adf-review-agent.yml triggers
-                 │
-                 └─ GraphQL API: Assign Copilot with customAgent: "adf-review"
-                    │
-                    └─ Copilot with ADF Review Agent starts automatically
-                       ├─ Reviews pipeline for correctness & best practices
-                       └─ Posts findings
-                          │
-                          ├─ ✅ No issues → Labels PR "approved"
-                          │
-                          ├─ ⚠️ Warnings only → Labels PR "approved-with-warnings"
-                          │
-                          └─ ❌ Errors found → Workflow: handle-adf-review-results.yml
-                             │
-                             └─ GraphQL API: Re-assign Copilot with customAgent: "adf-generate"
-                                │
-                                └─ Copilot fixes issues, pushes to branch
-                                   └─ Triggers review cycle again...
-                                      (up to 3 retries, then escalates to human)
+```mermaid
+flowchart TD
+    Issue["🎫 Issue created +\nlabeled adf-generate"]
+    Issue --> WF1
+
+    WF1["⚡ Workflow:\nassign-adf-generate-agent.yml"]
+    WF1 --> GQL1["🔗 GraphQL API:\nAssign Copilot with\ncustomAgent: adf-generate"]
+    GQL1 --> GenAgent
+
+    subgraph GenAgent["🤖 Copilot — ADF Generate Agent"]
+        G1["Reads issue requirements"]
+        G2["Generates ADF pipeline JSON"]
+        G3["Opens PR with label adf-pipeline"]
+        G1 --> G2 --> G3
+    end
+
+    GenAgent --> WF2["⚡ Workflow:\nassign-adf-review-agent.yml"]
+    WF2 --> GQL2["🔗 GraphQL API:\nAssign Copilot with\ncustomAgent: adf-review"]
+    GQL2 --> RevAgent
+
+    subgraph RevAgent["🔍 Copilot — ADF Review Agent"]
+        R1["Reviews pipeline for\ncorrectness & best practices"]
+        R2["Posts findings"]
+        R1 --> R2
+    end
+
+    RevAgent --> Clean["✅ No issues →\nLabels PR approved"]
+    RevAgent --> Warn["⚠️ Warnings only →\nLabels PR approved-with-warnings"]
+    RevAgent --> Errors["❌ Errors found"]
+
+    Errors --> WF3["⚡ Workflow:\nhandle-adf-review-results.yml"]
+    WF3 --> GQL3["🔗 GraphQL API:\nRe-assign Copilot with\ncustomAgent: adf-generate"]
+    GQL3 --> Fix["🔧 Copilot fixes issues,\npushes to branch"]
+    Fix -->|"Review cycle repeats\n up to 3 retries"| WF2
+    Fix -->|"After 3 retries"| Escalate["🚨 Escalates to\nhuman review"]
 ```
 
 ## How Agent Orchestration Works
@@ -392,44 +396,47 @@ Once the PAT is configured, the entire flow is **fully automated**.
 
 ## Workflow Diagram
 
-```
-┌─ Issue labeled "adf-generate"
-│
-├─ Workflow: assign-adf-generate-agent.yml
-│  ├─ Posts: "🤖 ADF Pipeline Generation Agent Assigned"
-│  ├─ Adds label: agent-in-progress
-│  └─ GraphQL: Assign Copilot with customAgent: "adf-generate"
-│
-└─ Copilot starts automatically
-   ├─ Reads issue requirements
-   ├─ Generates pipeline JSON
-   └─ Creates PR with label "adf-pipeline"
-      │
-      ├─ Workflow: assign-adf-review-agent.yml
-      │  ├─ Posts: "🔍 ADF Pipeline Review Agent Assigned"
-      │  ├─ Adds labels: review-in-progress, retry-count-1
-      │  └─ GraphQL: Assign Copilot with customAgent: "adf-review"
-      │
-      └─ Review agent starts automatically
-         ├─ Reviews pipeline
-         └─ Posts findings
-            │
-            ├─ Workflow: handle-adf-review-results.yml
-            │  │
-            │  ├─ If ERRORS:
-            │  │  ├─ GraphQL: Re-assign Copilot with customAgent: "adf-generate"
-            │  │  ├─ Labels: changes-requested, retry-count-N
-            │  │  └─ Agent fixes issues → Review cycle repeats
-            │  │
-            │  ├─ If WARNINGS only:
-            │  │  └─ Labels: approved-with-warnings
-            │  │
-            │  └─ If CLEAN:
-            │     └─ Labels: approved
-            │
-            └─ If retry-count >= 3:
-               └─ Workflow: escalate-to-human-review.yml
-                  └─ Labels: needs-human-review, escalated
+```mermaid
+flowchart TD
+    Start["🎫 Issue labeled adf-generate"] --> WF1
+
+    subgraph WF1["⚡ assign-adf-generate-agent.yml"]
+        W1A["Posts: 🤖 ADF Pipeline Generation Agent Assigned"]
+        W1B["Adds label: agent-in-progress"]
+        W1C["GraphQL: Assign Copilot\nwith customAgent: adf-generate"]
+        W1A --> W1B --> W1C
+    end
+
+    WF1 --> Copilot1["🤖 Copilot starts automatically\n• Reads issue requirements\n• Generates pipeline JSON\n• Creates PR with label adf-pipeline"]
+
+    Copilot1 --> WF2
+
+    subgraph WF2["⚡ assign-adf-review-agent.yml"]
+        W2A["Posts: 🔍 ADF Pipeline Review Agent Assigned"]
+        W2B["Adds labels: review-in-progress, retry-count-1"]
+        W2C["GraphQL: Assign Copilot\nwith customAgent: adf-review"]
+        W2A --> W2B --> W2C
+    end
+
+    WF2 --> Review["🔍 Review agent starts\n• Reviews pipeline\n• Posts findings"]
+
+    Review --> WF3
+
+    subgraph WF3["⚡ handle-adf-review-results.yml"]
+        Check{"Review result?"}
+        Check -->|"ERRORS"| ErrPath["GraphQL: Re-assign Copilot\nwith customAgent: adf-generate\nLabels: changes-requested, retry-count-N"]
+        Check -->|"WARNINGS only"| WarnPath["Labels: approved-with-warnings"]
+        Check -->|"CLEAN"| CleanPath["Labels: approved"]
+    end
+
+    ErrPath --> FixAgent["🔧 Agent fixes issues"]
+    FixAgent -->|"Review cycle repeats"| WF2
+
+    Review -->|"retry-count ≥ 3"| Escalate
+
+    subgraph Escalate["⚡ escalate-to-human-review.yml"]
+        Esc["Labels: needs-human-review, escalated"]
+    end
 ```
 
 ---
@@ -562,8 +569,12 @@ This repository teaches the following concepts through working examples:
 ### 4. Multi-Agent Collaboration Patterns
 **Pattern:** Generator → Reviewer → Fix cycle
 
-```
-[Generation Agent] → creates PR → [Review Agent] → finds issues → [Generation Agent] → fixes → [Review Agent] → approves
+```mermaid
+flowchart LR
+    GenA["Generation Agent"] -->|"creates PR"| RevA["Review Agent"]
+    RevA -->|"finds issues"| GenB["Generation Agent"]
+    GenB -->|"fixes"| RevB["Review Agent"]
+    RevB -->|"approves ✅"| Done["Done"]
 ```
 
 This pattern is applicable to many scenarios:
