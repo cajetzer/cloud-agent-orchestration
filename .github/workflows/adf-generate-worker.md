@@ -1,5 +1,5 @@
 ---
-description: "Worker workflow that invokes the ADF Generate agent for pipeline creation"
+description: "Worker workflow that invokes the ADF Generate agent for pipeline creation and fixes"
 
 on:
   workflow_dispatch:
@@ -16,6 +16,15 @@ on:
         description: "Issue body with requirements"
         required: true
         type: string
+      # Fix cycle inputs (optional - empty means initial generation)
+      pr_number:
+        description: "Existing PR number (for fix cycles)"
+        required: false
+        type: number
+      review_feedback:
+        description: "Review feedback to address (for fix cycles)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -23,12 +32,16 @@ permissions:
   pull-requests: read
 
 safe-outputs:
+  # For initial generation: create new PR
   create-pull-request:
     title-prefix: "[ADF Pipeline] "
     labels: [adf-pipeline, auto-generated]
     base: main
+  # For fix cycles: push commits to existing PR branch
+  add-commit:
+    max: 3
   add-comment:
-    max: 2
+    max: 3
   # Invoke the custom agent defined in .github/agents/
   assign-to-agent:
     agent: adf-generate
@@ -41,7 +54,7 @@ tools:
 
 # ADF Pipeline Generation Worker
 
-This workflow invokes the **ADF Generate Agent** (defined in `.github/agents/adf-generate.agent.md`) to create pipelines.
+This workflow invokes the **ADF Generate Agent** (defined in `.github/agents/adf-generate.agent.md`) to create or update pipelines.
 
 You are the **ADF Pipeline Generation Agent**. Your job is to generate Azure Data Factory pipeline JSON definitions based on the requirements provided.
 
@@ -51,8 +64,69 @@ You are being invoked by the orchestrator with:
 - Issue number: `${{ inputs.issue_number }}`
 - Issue title: `${{ inputs.issue_title }}`
 - Issue body: `${{ inputs.issue_body }}`
+- **PR number** (if fix cycle): `${{ inputs.pr_number }}`
+- **Review feedback** (if fix cycle): `${{ inputs.review_feedback }}`
 
-## Phase 1: Analyze Requirements
+## Determine Mode
+
+**Check if this is a fix cycle or initial generation:**
+
+- If `pr_number` is provided → This is a **FIX CYCLE** (update existing PR)
+- If `pr_number` is empty → This is **INITIAL GENERATION** (create new PR)
+
+---
+
+## FIX CYCLE MODE (pr_number provided)
+
+When `pr_number` is provided, you are fixing issues identified by the review agent.
+
+### Step 1: Read Review Feedback
+
+The `review_feedback` input contains the issues to fix. Parse it to understand:
+- Which specific errors/warnings were found
+- What file(s) need changes
+- What the expected fix is
+
+### Step 2: Read Current Pipeline
+
+1. Get the PR details to find the branch name
+2. Read the pipeline JSON file from the PR branch
+3. Understand the current state
+
+### Step 3: Apply Fixes
+
+For each issue in the review feedback:
+1. Locate the problematic section in the pipeline JSON
+2. Apply the fix following best practices
+3. Validate the fix against `rules/best_practices.json`
+
+### Step 4: Commit to Existing PR
+
+Use `add-commit` to push changes to the existing PR branch:
+- Commit message: `fix: Address review feedback - <summary of fixes>`
+- Do NOT create a new PR
+
+### Step 5: Comment on PR
+
+Add comment:
+```
+✅ **Fixes Applied**
+
+Addressed the following review feedback:
+<list of fixes applied>
+
+@adf-review — Ready for re-review.
+```
+
+**Then STOP** - the orchestrator will dispatch the review worker again.
+
+---
+
+## INITIAL GENERATION MODE (no pr_number)
+
+When `pr_number` is empty, generate a new pipeline from scratch.
+
+### Phase 1: Analyze Requirements
 
 Read the provided issue content and identify:
 

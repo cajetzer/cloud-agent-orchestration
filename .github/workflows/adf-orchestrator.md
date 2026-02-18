@@ -113,18 +113,63 @@ Remove label `generation-in-progress`, add label `review-in-progress`.
 
 Based on review worker output:
 
-**If errors found:**
-- Add label `changes-requested`
-- The review worker will have posted specific fix instructions
-- Generation worker can be re-dispatched after fixes
+**If errors found (label: `changes-requested`):**
+1. Read the review comment to extract the specific errors
+2. Track retry count (check for `retry-count-N` labels)
+3. If retry count < 3:
+   - Increment retry label (`retry-count-1` → `retry-count-2`)
+   - Re-dispatch `adf-generate-worker` with fix inputs:
+     - `issue_number`: Original issue
+     - `issue_title`: Original title
+     - `issue_body`: Original body
+     - `pr_number`: **The existing PR number**
+     - `review_feedback`: **The review errors to fix**
+   - Comment: "🔄 **Fix Cycle {N}/3** - Re-dispatching generation agent to address errors."
+4. If retry count >= 3:
+   - Add label `needs-human-review`
+   - Comment: "⚠️ **Escalation** - Pipeline failed review 3 times. Human review required."
 
-**If warnings only:**
-- Add label `approved-with-warnings`
+**If warnings only (label: `approved-with-warnings`):**
 - Comment: "Pipeline approved with minor suggestions. Ready for human review."
 
-**If clean:**
-- Add label `approved`
+**If clean (label: `approved`):**
 - Comment: "✅ Pipeline passed all checks. Ready for merge."
+
+## Orchestration State Machine
+
+```
+         ┌──────────────────────────────────────────────────────┐
+         │                                                      │
+         ▼                                                      │
+   [Issue Created]                                              │
+         │                                                      │
+         ▼                                                      │
+   [Dispatch Generate]──────►[PR Created]──────►[Dispatch Review]
+                                                      │
+                              ┌────────────────────────┼─────────────────┐
+                              │                        │                 │
+                              ▼                        ▼                 ▼
+                         [approved]           [warnings only]      [errors found]
+                              │                        │                 │
+                              ▼                        ▼                 │
+                          [DONE]              [approved-with-warnings]   │
+                                                      │                 │
+                                                      ▼                 │
+                                                   [DONE]               │
+                                                                        │
+                              ┌──────────────────────────────────────────┘
+                              │
+                              ▼
+                        retry < 3? ──yes──► [Re-dispatch Generate with feedback]
+                              │                        │
+                              no                       │
+                              │                        └───────────────────┘
+                              ▼                              (back to review)
+                    [needs-human-review]
+                              │
+                              ▼
+                          [ESCALATE]
+```
 
 ## Error Handling
 
