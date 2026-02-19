@@ -261,10 +261,27 @@ tools:
    gh aw compile
    ```
 
-4. **Add required secrets** for your coding agent:
-   - For Copilot: Uses your GitHub token automatically
-   - For Claude: Add `ANTHROPIC_API_KEY` secret
-   - For Codex: Add `OPENAI_API_KEY` secret
+4. **Add required secrets** for your AI engine:
+
+   **For Copilot (recommended)**: Create a Fine-Grained PAT with the `Copilot Requests` permission:
+   1. Go to [GitHub Personal Access Tokens](https://github.com/settings/personal-access-tokens/new)
+   2. Select your **user account** as the resource owner (not an organization)
+   3. Under Repository Access, select **"Public repositories"** (required to see Copilot permissions)
+   4. Under Account Permissions, enable **"Copilot Requests"**
+   5. Create the token and add it as a repository secret:
+      ```bash
+      gh aw secrets set COPILOT_GITHUB_TOKEN --value "your-pat-here"
+      ```
+
+   **For Claude**: Add your Anthropic API key:
+   ```bash
+   gh aw secrets set ANTHROPIC_API_KEY --value "your-api-key"
+   ```
+
+   **For Codex**: Add your OpenAI API key:
+   ```bash
+   gh aw secrets set OPENAI_API_KEY --value "your-api-key"
+   ```
 
 5. **Commit and push** the workflow files:
    ```bash
