@@ -44,7 +44,8 @@ safe-outputs:
     max: 3
 
 engine:
-  id: adf-generate
+  id: copilot
+  agent: adf-generate
 
 tools:
   github:

@@ -176,9 +176,9 @@ safe-outputs:
 **Role**: Invokes the ADF Review agent with knowledge base access
 
 ```yaml
-safe-outputs:
-  assign-to-agent:
-    agent: adf-review  # References .github/agents/adf-review.agent.md
+engine:
+  id: copilot
+  agent: adf-review  # References .github/agents/adf-review.agent.md
 
 tools:
   github:

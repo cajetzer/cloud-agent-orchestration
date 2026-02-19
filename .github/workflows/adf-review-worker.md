@@ -27,7 +27,8 @@ safe-outputs:
     max: 10
 
 engine:
-  id: adf-review
+  id: copilot
+  agent: adf-review
 
 tools:
   github:
