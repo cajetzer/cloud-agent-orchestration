@@ -536,8 +536,8 @@ jobs:
                   }
                 },
                 "required": [
-                  "pr_number",
-                  "issue_number"
+                  "issue_number",
+                  "pr_number"
                 ],
                 "type": "object"
               },
