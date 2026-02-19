@@ -373,6 +373,106 @@ The orchestrator can trigger worker workflows, passing context via inputs.
 
 ---
 
+## Observability & Troubleshooting
+
+### Understanding What Runs Where
+
+**Key distinction**: Agentic Workflows use **Copilot CLI** (not Coding Agent) inside GitHub Actions. This affects where you look for information:
+
+| What You're Looking For | Where to Find It |
+|-------------------------|------------------|
+| Workflow execution status | **Actions tab** → workflow runs |
+| Agent conversation/reasoning | **Actions logs** → `agent` job → step logs |
+| Safe output results (PRs, comments) | **PRs/Issues** created by the workflow |
+| Compilation errors | Run `gh aw compile` locally |
+| Workflow dispatch inputs | **Actions tab** → run → "Summary" |
+| Failure issues | Issues labeled `agentic-workflows` |
+
+### Viewing Workflow Runs
+
+1. Go to **Actions** tab in your repository
+2. Find runs by workflow name:
+   - `ADF Pipeline Orchestrator` - Main coordinator
+   - `ADF Pipeline Generation Worker` - Creates pipelines
+   - `ADF Pipeline Review Worker` - Reviews pipelines
+
+3. Click a run to see:
+   - **Summary**: Inputs passed to the workflow
+   - **Jobs**: `activation` → `agent` → `conclusion` (the 3 main jobs)
+   - **Logs**: Expand each job to see detailed output
+
+### Reading Agent Logs
+
+Inside a workflow run, expand the **`agent`** job to see:
+
+```
+┌─ Setup phase
+│  - Copilot CLI installation
+│  - MCP server startup (safe-outputs, github tools)
+│  - Gateway configuration
+│
+├─ Agent execution
+│  - Copilot CLI receives the prompt
+│  - Agent reads files, makes decisions
+│  - Tool calls (if any) appear here
+│
+└─ Conclusion phase
+    - Safe output processing
+    - PR/comment creation
+    - Failure reporting
+```
+
+**Important**: The actual agent "thinking" is inside a sandboxed container. You'll see:
+- Tool invocations and results
+- File operations
+- But NOT the full conversation (that's in artifact logs if uploaded)
+
+### Common Failure Patterns
+
+| Symptom | Cause | Solution |
+|---------|-------|----------|
+| "Secret Verification Failed" | Missing `COPILOT_GITHUB_TOKEN` | Add the PAT secret |
+| "No safe outputs generated" | Agent didn't call safe-output tools | Check workflow instructions |
+| Workflow compiles but agent does nothing | Missing tool permissions | Check `tools:` in frontmatter |
+| "dispatch-workflow: workflow must be compiled first" | Lock file missing | Run `gh aw compile` and commit |
+
+### Debugging with gh aw CLI
+
+```bash
+# Check which workflows are compiled
+gh aw status
+
+# Download and view logs from a run
+gh aw logs <workflow-run-url>
+
+# Audit a specific run for issues
+gh aw audit <run-id>
+
+# Interactive debug (if available)
+gh aw debug <workflow-name>
+```
+
+### What You WON'T See
+
+Unlike the GitHub Coding Agent:
+- **No agent session UI** - The work happens inside Actions, not a separate session
+- **No live streaming** - You see results after the job completes
+- **No "Copilot is working" indicator** - It's a batch job, not interactive
+
+### Automatic Failure Issues
+
+When workflows fail, the system automatically creates issues labeled `agentic-workflows`:
+- **Parent issue**: `[agentics] Failed runs` - Tracks all failures
+- **Child issues**: Individual failure reports with run links
+
+To debug a failure:
+1. Find the failure issue
+2. Click the workflow run URL
+3. Expand the `agent` job logs
+4. Look for error messages or missing tool calls
+
+---
+
 ## Why Agentic Workflows vs Other Approaches?
 
 ### Compared to Custom Agents + GraphQL Workflows (main branch)

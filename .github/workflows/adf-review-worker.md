@@ -73,6 +73,47 @@ In a production environment, this could be enhanced with:
 - A web-fetch call to a knowledge base API
 - Azure AI Search or similar service
 
+## Required Actions (Safe Outputs)
+
+**IMPORTANT**: This workflow runs in a sandboxed environment. To create or modify GitHub resources, you MUST call the safe-output tools via the `safeoutputs` MCP server.
+
+### Post Review Results:
+
+1. **Post a review comment** on the PR with your findings:
+   ```
+   Tool: safeoutputs.add_comment
+   Parameters:
+   - issue_number: ${{ inputs.pr_number }}
+   - body: "<structured review results with errors, warnings, and suggestions>"
+   ```
+
+2. **Add labels** based on review outcome:
+   ```
+   Tool: safeoutputs.add_labels
+   Parameters:
+   - issue_number: ${{ inputs.pr_number }}
+   - labels: ["changes-requested"] OR ["approved-with-warnings"] OR ["approved"]
+   ```
+
+3. **Optionally add inline review comments** for specific issues:
+   ```
+   Tool: safeoutputs.create_pull_request_review_comment
+   Parameters:
+   - pr_number: ${{ inputs.pr_number }}
+   - body: "<specific feedback>"
+   - path: "<file path>"
+   - line: <line number>
+   ```
+
+## Workflow Steps
+
+1. Read the PR description and changed files using GitHub tools
+2. Read each pipeline JSON file in `pipelines/` directory
+3. Check against `rules/best_practices.json`
+4. Query `rules/common_issues.json` for known anti-patterns
+5. Compile findings into errors, warnings, and suggestions
+6. **Call the safe-output tools** to post review and add labels
+
 ## Expected Output
 
 The agent will:
@@ -90,4 +131,4 @@ The agent will:
 
 ---
 
-_The agent will follow the detailed instructions in `.github/agents/adf-review.agent.md` to complete these tasks._
+_The agent will follow the detailed instructions in `.github/agents/adf-review.agent.md` for review logic, and use the safe-output tools above to publish results._

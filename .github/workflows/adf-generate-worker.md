@@ -80,17 +80,59 @@ The agent has access to:
 - Edit tools to create/modify pipeline JSON files
 - `jq` for JSON parsing and validation
 
-## Expected Output
+## Required Actions (Safe Outputs)
 
-### For Initial Generation:
-- A new PR created with the generated pipeline JSON in `pipelines/<pipeline-name>.json`
-- PR description with pipeline summary and self-review checklist
-- Comment on the original issue with PR link
+**IMPORTANT**: This workflow runs in a sandboxed environment. To create or modify GitHub resources, you MUST call the safe-output tools via the `safeoutputs` MCP server. Simply writing files is not enough - you must explicitly call these tools.
 
-### For Fix Cycle:
-- Commits pushed to the existing PR branch with fixes applied
-- Comment on the PR summarizing the fixes
+### For Initial Generation (no `pr_number`):
+
+1. **Create the pipeline file** using the `edit` tool to write to `pipelines/<pipeline-name>.json`
+
+2. **Create a Pull Request** by calling the `safeoutputs` MCP tool:
+   ```
+   Tool: safeoutputs.create_pull_request
+   Parameters:
+   - title: "<descriptive title for the pipeline>"
+   - body: "<PR description with Resolves #issue_number, pipeline summary, and checklist>"
+   - branch: "<new-branch-name>" (e.g., "adf/pipeline-name")
+   ```
+
+3. **Add a comment** on the original issue:
+   ```
+   Tool: safeoutputs.add_comment
+   Parameters:
+   - issue_number: ${{ inputs.issue_number }}
+   - body: "<message with PR link>"
+   ```
+
+### For Fix Cycle (`pr_number` provided):
+
+1. **Update the pipeline file** using the `edit` tool
+
+2. **Push changes** to the existing PR branch:
+   ```
+   Tool: safeoutputs.push_to_pull_request_branch
+   Parameters:
+   - pr_number: ${{ inputs.pr_number }}
+   - commit_message: "fix: <description of fixes>"
+   ```
+
+3. **Add a comment** on the PR:
+   ```
+   Tool: safeoutputs.add_comment
+   Parameters:
+   - issue_number: ${{ inputs.pr_number }}
+   - body: "<summary of fixes applied>"
+   ```
+
+## Workflow Steps
+
+1. Read the issue requirements from the inputs
+2. Read templates from `templates/` directory
+3. Generate the pipeline JSON following best practices in `rules/best_practices.json`
+4. Validate the pipeline (no hardcoded values, has retry policies, etc.)
+5. **Call the appropriate safe-output tools** to create/update the PR
 
 ---
 
-_The agent will follow the detailed instructions in `.github/agents/adf-generate.agent.md` to complete these tasks._
+_The agent will follow the detailed instructions in `.github/agents/adf-generate.agent.md` for pipeline generation logic, and use the safe-output tools above to publish results._
