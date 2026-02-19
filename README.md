@@ -161,8 +161,8 @@ inputs:
   review_feedback: optional # Errors to address
 
 safe-outputs:
-  create-pull-request: ...  # Used in INITIAL mode
-  add-commit: ...           # Used in FIX mode (updates existing PR)
+  create-pull-request: ...        # Used in INITIAL mode
+  push-to-pull-request-branch: ...  # Used in FIX mode (updates existing PR)
 ```
 
 **Two Modes**:

@@ -36,10 +36,9 @@ safe-outputs:
   create-pull-request:
     title-prefix: "[ADF Pipeline] "
     labels: [adf-pipeline, auto-generated]
-    base: main
+    base-branch: main
   # For fix cycles: push commits to existing PR branch
-  add-commit:
-    max: 3
+  push-to-pull-request-branch:
   add-comment:
     max: 3
 
