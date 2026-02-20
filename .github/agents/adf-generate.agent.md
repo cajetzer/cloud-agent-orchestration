@@ -1,7 +1,6 @@
 ---
 name: ADF Pipeline Generator
 description: Generates Azure Data Factory pipeline JSON definitions from issue requirements
-tools: ["read", "edit", "search"]
 ---
 
 # ADF Pipeline Generation Agent
@@ -94,15 +93,18 @@ Check against `rules/best_practices.json`:
 
 **Fix any issues before proceeding.**
 
-### 5. Create Pull Request
+### 5. Create Pull Request (using Safe Outputs)
 
-- Commit pipeline to `pipelines/<pipeline-name>.json`
-- Update PR description with:
-  - `Resolves #<issue-number>`
-  - Pipeline summary
-  - Self-review checklist
-  - Full pipeline JSON in code block
-- Add label `adf-pipeline`
+**CRITICAL**: You are running in a sandboxed workflow. To create PRs and comments, you MUST use the safe-output tools. Simply writing files won't create a PR.
+
+1. **Write the pipeline file** using the `edit` tool to create `pipelines/<pipeline-name>.json`
+
+2. **Call `create_pull_request`** safe-output tool with:
+   - `title`: Descriptive title for the pipeline
+   - `body`: PR description including `Resolves #<issue-number>`, pipeline summary, and self-review checklist
+
+3. **Call `add_comment`** safe-output tool to notify the issue:
+   - `body`: Message confirming pipeline generation with a note about the PR
 
 ### 6. Request Review
 
