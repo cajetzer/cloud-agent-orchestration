@@ -82,48 +82,32 @@ The agent has access to:
 
 ## Required Actions (Safe Outputs)
 
-**IMPORTANT**: This workflow runs in a sandboxed environment. To create or modify GitHub resources, you MUST call the safe-output tools via the `safeoutputs` MCP server. Simply writing files is not enough - you must explicitly call these tools.
+**CRITICAL**: This workflow runs in a sandboxed environment. You MUST call the safe-output MCP tools to create GitHub resources. Writing files alone does NOT create a PR — you must invoke the tools listed below. Do not just describe what you would do; actually call the tools.
 
 ### For Initial Generation (no `pr_number`):
 
 1. **Create the pipeline file** using the `edit` tool to write to `pipelines/<pipeline-name>.json`
 
-2. **Create a Pull Request** by calling the `safeoutputs` MCP tool:
-   ```
-   Tool: safeoutputs.create_pull_request
-   Parameters:
-   - title: "<descriptive title for the pipeline>"
-   - body: "<PR description with Resolves #issue_number, pipeline summary, and checklist>"
-   - branch: "<new-branch-name>" (e.g., "adf/pipeline-name")
-   ```
+2. **Call `create_pull_request`** via the safeoutputs MCP server:
+   - `title`: Descriptive title for the pipeline
+   - `body`: PR description including `Resolves #${{ inputs.issue_number }}`, pipeline summary, and self-review checklist
+   - `branch`: New branch name (e.g., `adf/pipeline-name`)
 
-3. **Add a comment** on the original issue:
-   ```
-   Tool: safeoutputs.add_comment
-   Parameters:
-   - issue_number: ${{ inputs.issue_number }}
-   - body: "<message with PR link>"
-   ```
+3. **Call `add_comment`** via the safeoutputs MCP server to notify the issue:
+   - `item_number`: `${{ inputs.issue_number }}`
+   - `body`: Message confirming pipeline generation with a note about the PR
 
 ### For Fix Cycle (`pr_number` provided):
 
 1. **Update the pipeline file** using the `edit` tool
 
-2. **Push changes** to the existing PR branch:
-   ```
-   Tool: safeoutputs.push_to_pull_request_branch
-   Parameters:
-   - pr_number: ${{ inputs.pr_number }}
-   - commit_message: "fix: <description of fixes>"
-   ```
+2. **Call `push_to_pull_request_branch`** via the safeoutputs MCP server:
+   - `pull_request_number`: `${{ inputs.pr_number }}`
+   - `message`: `fix: <description of fixes>`
 
-3. **Add a comment** on the PR:
-   ```
-   Tool: safeoutputs.add_comment
-   Parameters:
-   - issue_number: ${{ inputs.pr_number }}
-   - body: "<summary of fixes applied>"
-   ```
+3. **Call `add_comment`** via the safeoutputs MCP server on the PR:
+   - `item_number`: `${{ inputs.pr_number }}`
+   - `body`: Summary of fixes applied
 
 ## Workflow Steps
 
@@ -131,8 +115,8 @@ The agent has access to:
 2. Read templates from `templates/` directory
 3. Generate the pipeline JSON following best practices in `rules/best_practices.json`
 4. Validate the pipeline (no hardcoded values, has retry policies, etc.)
-5. **Call the appropriate safe-output tools** to create/update the PR
+5. **Call the appropriate safe-output MCP tools** to create/update the PR — this step is mandatory
 
 ---
 
-_The agent will follow the detailed instructions in `.github/agents/adf-generate.agent.md` for pipeline generation logic, and use the safe-output tools above to publish results._
+_The agent will follow the detailed instructions in `.github/agents/adf-generate.agent.md` for pipeline generation logic, and use the safe-output MCP tools above to publish results. If no tools can be called due to missing data or a limitation, call the `noop` or `missing_data` tool to report the status._

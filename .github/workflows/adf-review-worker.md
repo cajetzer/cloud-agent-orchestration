@@ -75,35 +75,23 @@ In a production environment, this could be enhanced with:
 
 ## Required Actions (Safe Outputs)
 
-**IMPORTANT**: This workflow runs in a sandboxed environment. To create or modify GitHub resources, you MUST call the safe-output tools via the `safeoutputs` MCP server.
+**CRITICAL**: This workflow runs in a sandboxed environment. You MUST call the safe-output MCP tools to post review results. Do not just describe what you would do; actually invoke the tools listed below.
 
 ### Post Review Results:
 
-1. **Post a review comment** on the PR with your findings:
-   ```
-   Tool: safeoutputs.add_comment
-   Parameters:
-   - issue_number: ${{ inputs.pr_number }}
-   - body: "<structured review results with errors, warnings, and suggestions>"
-   ```
+1. **Call `add_comment`** via the safeoutputs MCP server to post your findings on the PR:
+   - `item_number`: `${{ inputs.pr_number }}`
+   - `body`: Structured review results with errors, warnings, and suggestions
 
-2. **Add labels** based on review outcome:
-   ```
-   Tool: safeoutputs.add_labels
-   Parameters:
-   - issue_number: ${{ inputs.pr_number }}
-   - labels: ["changes-requested"] OR ["approved-with-warnings"] OR ["approved"]
-   ```
+2. **Call `add_labels`** via the safeoutputs MCP server based on review outcome:
+   - `item_number`: `${{ inputs.pr_number }}`
+   - `labels`: `["changes-requested"]` OR `["approved-with-warnings"]` OR `["approved"]`
 
-3. **Optionally add inline review comments** for specific issues:
-   ```
-   Tool: safeoutputs.create_pull_request_review_comment
-   Parameters:
-   - pr_number: ${{ inputs.pr_number }}
-   - body: "<specific feedback>"
-   - path: "<file path>"
-   - line: <line number>
-   ```
+3. **Optionally call `create_pull_request_review_comment`** via the safeoutputs MCP server for specific inline issues:
+   - `pr_number`: `${{ inputs.pr_number }}`
+   - `body`: Specific feedback
+   - `path`: File path
+   - `line`: Line number
 
 ## Workflow Steps
 
@@ -131,4 +119,4 @@ The agent will:
 
 ---
 
-_The agent will follow the detailed instructions in `.github/agents/adf-review.agent.md` for review logic, and use the safe-output tools above to publish results._
+_The agent will follow the detailed instructions in `.github/agents/adf-review.agent.md` for review logic, and use the safe-output MCP tools above to publish results. If no tools can be called due to missing data or a limitation, call the `noop` or `missing_data` tool to report the status._
