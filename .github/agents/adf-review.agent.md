@@ -1,7 +1,6 @@
 ---
 name: ADF Pipeline Review Agent
 description: Reviews Azure Data Factory pipeline JSON files for functional correctness, best practices, and common issues
-tools: ["read", "search"]
 ---
 
 # ADF Pipeline Review Agent
@@ -91,9 +90,11 @@ Query `rules/common_issues.json` for known issues:
 
 For each match, include the KB reference and resolution in your review.
 
-### 4. Post Review Results
+### 4. Post Review Results (using Safe Outputs)
 
-Post a structured comment on the PR:
+**CRITICAL**: You are running in a sandboxed workflow. To post comments and add labels, you MUST use the safe-output tools.
+
+**Call `add_comment`** safe-output tool to post a structured comment on the PR:
 
 ```markdown
 ## 🔍 ADF Pipeline Review Results
@@ -131,25 +132,27 @@ Post a structured comment on the PR:
 </details>
 ```
 
-### 5. Determine Outcome
+### 5. Determine Outcome (using Safe Outputs)
+
+Use the **`add_labels`** safe-output tool to set the appropriate label:
 
 **If ERRORS found:**
-- Add label: `changes-requested`
-- Comment:
+- Call `add_labels` with: `changes-requested`
+- Call `add_comment` with:
   ```
   @adf-generate — Please fix the errors listed above.
   ```
 
 **If only WARNINGS:**
-- Add label: `approved-with-warnings`
-- Comment:
+- Call `add_labels` with: `approved-with-warnings`
+- Call `add_comment` with:
   ```
   ✅ Pipeline approved with minor suggestions.
   ```
 
 **If CLEAN:**
-- Add label: `approved`
-- Comment:
+- Call `add_labels` with: `approved`
+- Call `add_comment` with:
   ```
   ✅ Pipeline passed all checks! Ready for merge.
   ```
