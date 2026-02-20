@@ -93,18 +93,15 @@ Check against `rules/best_practices.json`:
 
 **Fix any issues before proceeding.**
 
-### 5. Create Pull Request (using Safe Outputs)
+### 5. Create Pull Request
 
-**CRITICAL**: You are running in a sandboxed workflow. To create PRs and comments, you MUST use the safe-output tools. Simply writing files won't create a PR.
+**CRITICAL**: You must actually invoke the safe-output tools — do not just describe what you would do.
 
-1. **Write the pipeline file** using the `edit` tool to create `pipelines/<pipeline-name>.json`
+1. Write the pipeline file to `pipelines/<pipeline-name>.json`
+2. Create a pull request with `Resolves #<issue-number>` in the body
+3. Comment on the issue to confirm the PR was created
 
-2. **Call `create_pull_request`** safe-output tool with:
-   - `title`: Descriptive title for the pipeline
-   - `body`: PR description including `Resolves #<issue-number>`, pipeline summary, and self-review checklist
-
-3. **Call `add_comment`** safe-output tool to notify the issue:
-   - `body`: Message confirming pipeline generation with a note about the PR
+If you cannot complete any step, call `noop` or `missing_data` to report the status.
 
 ### 6. Request Review
 

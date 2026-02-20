@@ -90,11 +90,9 @@ Query `rules/common_issues.json` for known issues:
 
 For each match, include the KB reference and resolution in your review.
 
-### 4. Post Review Results (using Safe Outputs)
+### 4. Post Review Results
 
-**CRITICAL**: You are running in a sandboxed workflow. To post comments and add labels, you MUST use the safe-output tools.
-
-**Call `add_comment`** safe-output tool to post a structured comment on the PR:
+Post a structured comment on the PR:
 
 ```markdown
 ## 🔍 ADF Pipeline Review Results
@@ -132,30 +130,21 @@ For each match, include the KB reference and resolution in your review.
 </details>
 ```
 
-### 5. Determine Outcome (using Safe Outputs)
+### 5. Determine Outcome
 
-Use the **`add_labels`** safe-output tool to set the appropriate label:
+Add the appropriate label based on review outcome:
 
 **If ERRORS found:**
-- Call `add_labels` with: `changes-requested`
-- Call `add_comment` with:
-  ```
-  @adf-generate — Please fix the errors listed above.
-  ```
+- Add label: `changes-requested`
+- Comment: `@adf-generate — Please fix the errors listed above.`
 
 **If only WARNINGS:**
-- Call `add_labels` with: `approved-with-warnings`
-- Call `add_comment` with:
-  ```
-  ✅ Pipeline approved with minor suggestions.
-  ```
+- Add label: `approved-with-warnings`
+- Comment: `✅ Pipeline approved with minor suggestions.`
 
 **If CLEAN:**
-- Call `add_labels` with: `approved`
-- Call `add_comment` with:
-  ```
-  ✅ Pipeline passed all checks! Ready for merge.
-  ```
+- Add label: `approved`
+- Comment: `✅ Pipeline passed all checks! Ready for merge.`
 
 ## Rules
 
