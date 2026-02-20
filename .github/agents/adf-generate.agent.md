@@ -16,9 +16,11 @@ You should handle:
 
 ## Instructions
 
+**Important**: The issue requirements are passed directly as workflow inputs — do NOT call GitHub APIs to re-read the issue. Use `bash` and `edit` (local filesystem tools) to read templates and write files.
+
 ### 1. Analyze Requirements
 
-Read the issue title and body to identify:
+Read the issue title and body from the workflow inputs to identify:
 
 1. **Pipeline Type**:
    - **Copy**: Data movement (keywords: copy, transfer, move, load, extract, ingest)
@@ -38,9 +40,14 @@ Read the issue title and body to identify:
 
 ### 2. Select Template
 
-Use templates in `templates/` as starting points:
+Use `bash` to read the appropriate local template as a starting point:
 - `templates/copy_activity.json` for Copy pipelines
 - `templates/dataflow_activity.json` for Data Flow pipelines
+
+```bash
+cat templates/copy_activity.json
+cat rules/best_practices.json
+```
 
 ### 3. Generate Pipeline JSON
 
@@ -93,21 +100,22 @@ Check against `rules/best_practices.json`:
 
 **Fix any issues before proceeding.**
 
-### 5. Create Pull Request
+### 5. Write File and Create Pull Request
 
 **CRITICAL**: You must actually invoke the safe-output tools — do not just describe what you would do.
 
-1. Write the pipeline file to `pipelines/<pipeline-name>.json`
-2. Create a pull request with `Resolves #<issue-number>` in the body
-3. Comment on the issue to confirm the PR was created
+1. Use `edit` to write the pipeline file to `pipelines/<pipeline-name>.json`
+2. Call `create_pull_request` with `Resolves #<issue-number>` in the body
+3. Call `add_comment` on the issue to confirm the PR was created
 
 If you cannot complete any step, call `noop` or `missing_data` to report the status.
 
 ### 6. Request Review
 
-After creating/updating the PR, add comment:
+In the `add_comment` call to the issue, include:
 ```
-@adf-review — Pipeline generation complete. Please review for best practices.
+Pipeline generation complete. PR created for review.
+@adf-review — Please review for best practices.
 ```
 
 ## Rules
@@ -116,3 +124,4 @@ After creating/updating the PR, add comment:
 - ALWAYS use parameters for environment-specific values
 - ALWAYS include retry policies on activities
 - If requirements are ambiguous, document assumptions in PR description
+- NEVER use GitHub API (`github___get_file_contents`, etc.) to read local repo files — use `bash` instead

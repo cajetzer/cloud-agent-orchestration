@@ -60,21 +60,29 @@ Generate an Azure Data Factory pipeline based on the issue requirements.
 
 **CRITICAL: You must actually invoke the safe-output tools — do not just describe what you would do.**
 
-Based on the inputs provided:
-- **Issue**: #${{ inputs.issue_number }} — "${{ inputs.issue_title }}"
-- **Requirements**: ${{ inputs.issue_body }}
-- **Fix cycle PR** (if provided): #${{ inputs.pr_number }}
-- **Review feedback** (if fix cycle): ${{ inputs.review_feedback }}
+All required information is already provided below — do NOT re-read the issue or explore the repository structure via GitHub API.
+
+**Issue**: #${{ inputs.issue_number }} — "${{ inputs.issue_title }}"
+
+**Requirements**:
+${{ inputs.issue_body }}
+
+**Fix cycle PR** (if provided): #${{ inputs.pr_number }}
+**Review feedback** (if fix cycle): ${{ inputs.review_feedback }}
 
 ### If this is initial generation (no `pr_number`):
-1. Generate the pipeline JSON following templates in `templates/` and rules in `rules/best_practices.json`
-2. Write the pipeline to `pipelines/<pipeline-name>.json`
-3. Create a pull request with the pipeline (include `Resolves #${{ inputs.issue_number }}` in the body)
-4. Comment on the issue to confirm the PR was created
+
+1. Use `bash` to read `templates/copy_activity.json` or `templates/dataflow_activity.json` and `rules/best_practices.json` from the local checkout
+2. Generate the complete pipeline JSON (use local tools only — no GitHub API reads needed)
+3. Write the pipeline file to `pipelines/<pipeline-name>.json` using `edit`
+4. Call `create_pull_request` with title and body (include `Resolves #${{ inputs.issue_number }}` in the body)
+5. Call `add_comment` on issue #${{ inputs.issue_number }} to confirm the PR was created
 
 ### If this is a fix cycle (`pr_number` provided):
-1. Read the review feedback and update the pipeline accordingly
-2. Push the changes to the existing PR branch
-3. Comment on the PR with a summary of fixes applied
 
-If you cannot complete the task, call `noop` or `missing_data` to report why.
+1. Use `bash` to read the current pipeline from `pipelines/` in the local checkout
+2. Apply the review feedback changes using `edit`
+3. Call `push_to_pull_request_branch` to push the fixes
+4. Call `add_comment` on PR #${{ inputs.pr_number }} with a summary of fixes applied
+
+If you cannot complete the task, call `noop` or `missing_data` to explain why.
