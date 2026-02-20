@@ -23,7 +23,7 @@
 #
 # Worker workflow that invokes the ADF Generate agent for pipeline creation and fixes
 #
-# gh-aw-metadata: {"schema_version":"v1","frontmatter_hash":"f4e36aea6f36df0d89600862293fa83fe976442f5b86c98c4e942829f8f652a0","compiler_version":"v0.47.1"}
+# gh-aw-metadata: {"schema_version":"v1","frontmatter_hash":"d1ae12219643a36da11267eb5779abb03e7b0ad3b0acd5f77300c153262a8793","compiler_version":"v0.47.1"}
 
 name: "ADF Pipeline Generation Worker"
 "on":
