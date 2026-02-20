@@ -37,86 +37,20 @@ tools:
 
 # ADF Pipeline Review Worker
 
-This workflow invokes the **ADF Review Agent** (defined in `.github/agents/adf-review.agent.md`) to review Azure Data Factory pipeline JSON files.
+Review the Azure Data Factory pipeline in the specified pull request.
 
-## Workflow Context
+## Task
 
-The agent receives the following inputs from the orchestrator:
-- **PR number**: `${{ inputs.pr_number }}`
-- **Original issue**: `${{ inputs.issue_number }}`
+**CRITICAL: You must actually invoke the safe-output tools — do not just describe what you would do.**
 
-## Available Resources
+Review PR #${{ inputs.pr_number }} (related to issue #${{ inputs.issue_number }}):
 
-The agent has access to:
-- **GitHub tools**: Read PR files, post comments and reviews, access repository content
-- **bash tools**: `jq` and `cat` commands for JSON parsing
-- **Knowledge Base**: `rules/common_issues.json` contains known ADF issues and resolutions
-- **Best Practices**: `rules/best_practices.json` defines validation rules
-
-## Knowledge Base Access
-
-The agent can read the knowledge base using bash commands:
-
-```bash
-# Read the knowledge base
-cat rules/common_issues.json | jq '.issues'
-
-# Search for specific issue
-cat rules/common_issues.json | jq '.issues["KB-010"]'
-
-# Get all anti-patterns
-cat rules/common_issues.json | jq '.antipatterns'
-```
-
-In a production environment, this could be enhanced with:
-- An MCP server connected to a vector database
-- A web-fetch call to a knowledge base API
-- Azure AI Search or similar service
-
-## Required Actions (Safe Outputs)
-
-**CRITICAL**: This workflow runs in a sandboxed environment. You MUST call the safe-output MCP tools to post review results. Do not just describe what you would do; actually invoke the tools listed below.
-
-### Post Review Results:
-
-1. **Call `add_comment`** via the safeoutputs MCP server to post your findings on the PR:
-   - `item_number`: `${{ inputs.pr_number }}`
-   - `body`: Structured review results with errors, warnings, and suggestions
-
-2. **Call `add_labels`** via the safeoutputs MCP server based on review outcome:
-   - `item_number`: `${{ inputs.pr_number }}`
-   - `labels`: `["changes-requested"]` OR `["approved-with-warnings"]` OR `["approved"]`
-
-3. **Optionally call `create_pull_request_review_comment`** via the safeoutputs MCP server for specific inline issues:
-   - `pr_number`: `${{ inputs.pr_number }}`
-   - `body`: Specific feedback
-   - `path`: File path
-   - `line`: Line number
-
-## Workflow Steps
-
-1. Read the PR description and changed files using GitHub tools
-2. Read each pipeline JSON file in `pipelines/` directory
-3. Check against `rules/best_practices.json`
-4. Query `rules/common_issues.json` for known anti-patterns
-5. Compile findings into errors, warnings, and suggestions
-6. **Call the safe-output tools** to post review and add labels
-
-## Expected Output
-
-The agent will:
-1. Read the PR description and changed files
-2. Review pipeline JSON files in `pipelines/` directory
-3. Check against best practices and the knowledge base
-4. Post structured review comments with findings categorized as:
-   - ❌ **ERROR** - Must be fixed before merging
-   - ⚠️ **WARNING** - Should be fixed
-   - ℹ️ **INFO** - Suggestions
-5. Add appropriate labels to the PR:
+1. Read the pipeline JSON files in `pipelines/` directory
+2. Validate against `rules/best_practices.json` and check for issues in `rules/common_issues.json`
+3. Post a structured review comment with your findings (errors, warnings, suggestions)
+4. Add the appropriate label based on the outcome:
    - `changes-requested` if errors found
-   - `approved-with-warnings` if only warnings
+   - `approved-with-warnings` if only warnings  
    - `approved` if clean
 
----
-
-_The agent will follow the detailed instructions in `.github/agents/adf-review.agent.md` for review logic, and use the safe-output MCP tools above to publish results. If no tools can be called due to missing data or a limitation, call the `noop` or `missing_data` tool to report the status._
+If you cannot complete the task, call `noop` or `missing_data` to report why.

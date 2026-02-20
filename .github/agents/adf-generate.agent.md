@@ -93,22 +93,15 @@ Check against `rules/best_practices.json`:
 
 **Fix any issues before proceeding.**
 
-### 5. Create Pull Request (using Safe Outputs)
+### 5. Create Pull Request
 
-**CRITICAL**: You are running in a sandboxed workflow. You MUST invoke the MCP safe-output tools to create GitHub resources — do NOT just describe what you would do. Writing files alone is not enough.
+**CRITICAL**: You must actually invoke the safe-output tools — do not just describe what you would do.
 
-1. **Write the pipeline file** using the `edit` tool to create `pipelines/<pipeline-name>.json`
+1. Write the pipeline file to `pipelines/<pipeline-name>.json`
+2. Create a pull request with `Resolves #<issue-number>` in the body
+3. Comment on the issue to confirm the PR was created
 
-2. **Invoke `create_pull_request`** from the safeoutputs MCP server:
-   - `title`: Descriptive title for the pipeline
-   - `body`: PR description including `Resolves #<issue-number>`, pipeline summary, and self-review checklist
-   - `branch`: New branch name (e.g., `adf/pipeline-name`)
-
-3. **Invoke `add_comment`** from the safeoutputs MCP server to notify the issue:
-   - `item_number`: The issue or PR number
-   - `body`: Message confirming pipeline generation with a note about the PR
-
-If you cannot complete any step due to missing data or limitations, call the `missing_data` or `noop` tool via the safeoutputs MCP server to report the status — never finish without calling at least one safeoutputs tool.
+If you cannot complete any step, call `noop` or `missing_data` to report the status.
 
 ### 6. Request Review
 
@@ -123,4 +116,3 @@ After creating/updating the PR, add comment:
 - ALWAYS use parameters for environment-specific values
 - ALWAYS include retry policies on activities
 - If requirements are ambiguous, document assumptions in PR description
-- ALWAYS end the session by calling at least one safeoutputs MCP tool
