@@ -74,10 +74,9 @@ ${{ inputs.issue_body }}
 
 1. Use `bash` to read `templates/copy_activity.json` or `templates/dataflow_activity.json` and `rules/best_practices.json` from the local checkout
 2. Generate the complete pipeline JSON (use local tools only — no GitHub API reads needed)
-3. Use `bash` to create the output directory: `mkdir -p pipelines`
-4. Write the pipeline file to `pipelines/<pipeline-name>.json` using `edit`
-5. Call `create_pull_request` with title and body (include `Resolves #${{ inputs.issue_number }}` in the body)
-6. Call `add_comment` on issue #${{ inputs.issue_number }} to confirm the PR was created
+3. Write the pipeline file to `pipelines/<pipeline-name>.json` using `edit`
+4. Call `create_pull_request` with title and body (include `Resolves #${{ inputs.issue_number }}` in the body)
+5. Call `add_comment` on issue #${{ inputs.issue_number }} to confirm the PR was created
 
 ### If this is a fix cycle (`pr_number` provided):
 

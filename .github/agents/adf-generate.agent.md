@@ -104,10 +104,9 @@ Check against `rules/best_practices.json`:
 
 **CRITICAL**: You must actually invoke the safe-output tools — do not just describe what you would do.
 
-1. Use `bash` to create the output directory: `mkdir -p pipelines`
-2. Use `edit` to write the pipeline file to `pipelines/<pipeline-name>.json`
-3. Call `create_pull_request` with `Resolves #<issue-number>` in the body
-4. Call `add_comment` on the issue to confirm the PR was created
+1. Use `edit` to write the pipeline file to `pipelines/<pipeline-name>.json`
+2. Call `create_pull_request` with `Resolves #<issue-number>` in the body
+3. Call `add_comment` on the issue to confirm the PR was created
 
 If you cannot complete any step, call `noop` or `missing_data` to report the status.
 
