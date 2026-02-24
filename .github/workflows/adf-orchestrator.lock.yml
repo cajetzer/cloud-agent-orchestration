@@ -23,7 +23,7 @@
 #
 # Orchestrates ADF pipeline generation and review using separate worker agents
 #
-# gh-aw-metadata: {"schema_version":"v1","frontmatter_hash":"5846c3a43de7eaf92f173dca6f56744d7353c337a1c0c219508eb3108cdf6ff4","compiler_version":"v0.50.1"}
+# gh-aw-metadata: {"schema_version":"v1","frontmatter_hash":"18ed8864acefbba704c615b47b619556c75ddd150d916609fd3ec3cfe1df0307","compiler_version":"v0.50.1"}
 
 name: "ADF Pipeline Orchestrator"
 "on":
@@ -59,7 +59,7 @@ jobs:
       title: ${{ steps.sanitized.outputs.title }}
     steps:
       - name: Setup Scripts
-        uses: github/gh-aw/actions/setup@9c0b9b8a4cd05f7286213b5636e33d7e6443da89 # v0.50.1
+        uses: github/gh-aw/actions/setup@v0.50.1
         with:
           destination: /opt/gh-aw/actions
       - name: Validate context variables
@@ -121,7 +121,7 @@ jobs:
           cat "/opt/gh-aw/prompts/safe_outputs_prompt.md"
           cat << 'GH_AW_PROMPT_EOF'
           <safe-output-tools>
-          Tools: add_comment, add_labels, dispatch_workflow, missing_tool, missing_data
+          Tools: add_comment, add_labels, remove_labels, dispatch_workflow, missing_tool, missing_data
           </safe-output-tools>
           <github-context>
           The following GitHub context information is available for this workflow:
@@ -248,7 +248,7 @@ jobs:
       secret_verification_result: ${{ steps.validate-secret.outputs.verification_result }}
     steps:
       - name: Setup Scripts
-        uses: github/gh-aw/actions/setup@9c0b9b8a4cd05f7286213b5636e33d7e6443da89 # v0.50.1
+        uses: github/gh-aw/actions/setup@v0.50.1
         with:
           destination: /opt/gh-aw/actions
       - name: Checkout repository
@@ -354,7 +354,7 @@ jobs:
           mkdir -p /tmp/gh-aw/safeoutputs
           mkdir -p /tmp/gh-aw/mcp-logs/safeoutputs
           cat > /opt/gh-aw/safeoutputs/config.json << 'GH_AW_SAFE_OUTPUTS_CONFIG_EOF'
-          {"add_comment":{"max":3},"add_labels":{"max":3},"dispatch_workflow":{"max":5,"workflow_files":{"adf-generate-worker":".lock.yml","adf-review-worker":".lock.yml"},"workflows":["adf-generate-worker","adf-review-worker"]},"missing_data":{},"missing_tool":{},"noop":{"max":1}}
+          {"add_comment":{"max":3},"add_labels":{"max":3},"dispatch_workflow":{"max":5,"workflow_files":{"adf-generate-worker":".lock.yml","adf-review-worker":".lock.yml"},"workflows":["adf-generate-worker","adf-review-worker"]},"missing_data":{},"missing_tool":{},"noop":{"max":1},"remove_labels":{"max":3}}
           GH_AW_SAFE_OUTPUTS_CONFIG_EOF
           cat > /opt/gh-aw/safeoutputs/tools.json << 'GH_AW_SAFE_OUTPUTS_TOOLS_EOF'
           [
@@ -399,6 +399,30 @@ jobs:
                 "type": "object"
               },
               "name": "add_labels"
+            },
+            {
+              "description": "Remove labels from an existing GitHub issue or pull request. Silently skips labels that don't exist on the item. Use this to clean up labels or manage label lifecycles (e.g., removing 'needs-review' after review is complete). CONSTRAINTS: Maximum 3 label(s) can be removed.",
+              "inputSchema": {
+                "additionalProperties": false,
+                "properties": {
+                  "item_number": {
+                    "description": "Issue or PR number to remove labels from. This is the numeric ID from the GitHub URL (e.g., 456 in github.com/owner/repo/issues/456). If omitted, removes labels from the item that triggered this workflow.",
+                    "type": "number"
+                  },
+                  "labels": {
+                    "description": "Label names to remove (e.g., ['smoke', 'needs-triage']). Non-existent labels are silently skipped.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "labels"
+                ],
+                "type": "object"
+              },
+              "name": "remove_labels"
             },
             {
               "description": "Report that a tool or capability needed to complete the task is not available, or share any information you deem important about missing functionality or limitations. Use this when you cannot accomplish what was requested because the required functionality is missing or access is restricted.",
@@ -623,6 +647,25 @@ jobs:
                   "type": "string",
                   "sanitize": true,
                   "maxLength": 65000
+                }
+              }
+            },
+            "remove_labels": {
+              "defaultMax": 5,
+              "fields": {
+                "item_number": {
+                  "issueOrPRNumber": true
+                },
+                "labels": {
+                  "required": true,
+                  "type": "array",
+                  "itemType": "string",
+                  "itemSanitize": true,
+                  "itemMaxLength": 128
+                },
+                "repo": {
+                  "type": "string",
+                  "maxLength": 256
                 }
               }
             }
@@ -1027,7 +1070,7 @@ jobs:
       total_count: ${{ steps.missing_tool.outputs.total_count }}
     steps:
       - name: Setup Scripts
-        uses: github/gh-aw/actions/setup@9c0b9b8a4cd05f7286213b5636e33d7e6443da89 # v0.50.1
+        uses: github/gh-aw/actions/setup@v0.50.1
         with:
           destination: /opt/gh-aw/actions
       - name: Download agent output artifact
@@ -1113,7 +1156,7 @@ jobs:
       matched_command: ''
     steps:
       - name: Setup Scripts
-        uses: github/gh-aw/actions/setup@9c0b9b8a4cd05f7286213b5636e33d7e6443da89 # v0.50.1
+        uses: github/gh-aw/actions/setup@v0.50.1
         with:
           destination: /opt/gh-aw/actions
       - name: Check team membership for workflow
@@ -1153,7 +1196,7 @@ jobs:
       process_safe_outputs_temporary_id_map: ${{ steps.process_safe_outputs.outputs.temporary_id_map }}
     steps:
       - name: Setup Scripts
-        uses: github/gh-aw/actions/setup@9c0b9b8a4cd05f7286213b5636e33d7e6443da89 # v0.50.1
+        uses: github/gh-aw/actions/setup@v0.50.1
         with:
           destination: /opt/gh-aw/actions
       - name: Download agent output artifact
@@ -1172,7 +1215,7 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           GH_AW_AGENT_OUTPUT: ${{ env.GH_AW_AGENT_OUTPUT }}
-          GH_AW_SAFE_OUTPUTS_HANDLER_CONFIG: "{\"add_comment\":{\"max\":3},\"add_labels\":{\"max\":3},\"dispatch_workflow\":{\"max\":5,\"workflow_files\":{\"adf-generate-worker\":\".lock.yml\",\"adf-review-worker\":\".lock.yml\"},\"workflows\":[\"adf-generate-worker\",\"adf-review-worker\"]},\"missing_data\":{},\"missing_tool\":{}}"
+          GH_AW_SAFE_OUTPUTS_HANDLER_CONFIG: "{\"add_comment\":{\"max\":3},\"add_labels\":{\"max\":3},\"dispatch_workflow\":{\"max\":5,\"workflow_files\":{\"adf-generate-worker\":\".lock.yml\",\"adf-review-worker\":\".lock.yml\"},\"workflows\":[\"adf-generate-worker\",\"adf-review-worker\"]},\"missing_data\":{},\"missing_tool\":{},\"remove_labels\":{\"max\":3}}"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
