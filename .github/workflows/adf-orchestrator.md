@@ -6,6 +6,10 @@ on:
     types: [labeled]
   pull_request:
     types: [opened, labeled]
+  workflow_run:
+    workflows: ["ADF Pipeline Generation Worker", "ADF Pipeline Review Worker"]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
@@ -31,7 +35,7 @@ tools:
 
 Coordinate the ADF pipeline generation and review process by dispatching work to specialized worker agents.
 
-This workflow is triggered by two different events. Handle each event differently:
+This workflow is triggered by three different events. Handle each event differently:
 
 ---
 
@@ -69,7 +73,26 @@ _Track progress in the Actions tab._
 
 Add label `generation-in-progress`.
 
-**Stop here.** The generation worker runs asynchronously. When it creates a PR labeled `adf-pipeline` and `auto-generated`, this orchestrator will be re-triggered by the `pull_request: opened` or `pull_request: labeled` event to continue the process.
+**Stop here.** The generation worker runs asynchronously. When it completes, this orchestrator will be re-triggered by the `workflow_run: completed` event to continue the process.
+
+---
+
+## When triggered by a `workflow_run` event (worker workflow completed)
+
+This event fires when either the generation or review worker workflow completes. GitHub Actions events created by `GITHUB_TOKEN` do not trigger other workflows (to prevent cascades), so PR creation and label changes by workers won't fire `pull_request` events. The `workflow_run` trigger bridges this gap.
+
+### Determine which worker completed
+
+1. Check `${{ github.event.workflow_run.conclusion }}`:
+   - If not `success`, add a comment on the linked issue or PR noting the failure, add label `workflow-error`, and stop.
+
+2. Use the GitHub API to look up the workflow run `${{ github.event.workflow_run.id }}` to determine which worker workflow completed:
+   - If the generation worker completed → Proceed to Step 3 below.
+   - If the review worker completed → Proceed to Step 4 below.
+
+### Find the relevant PR
+
+Use the GitHub API to search for the most recently opened pull request with labels `adf-pipeline` AND `auto-generated`. Use this PR for Step 3 or Step 4 below, the same as if the orchestrator had been triggered by a `pull_request` event on that PR.
 
 ---
 
@@ -142,26 +165,26 @@ After the review worker completes, the PR will have a review outcome label. If t
    [Issue Labeled]                                                     │
          │                                                              │
          ▼                                                              │
-   [Dispatch Generate]──────►[PR Created+Labeled]──────►[Dispatch Review]
-          (stop, wait for PR)   (re-triggers orchestrator)              │
-                                                      ┌─────────────────┼──────────────┐
-                                                      │                 │              │
-                                                      ▼                 ▼              ▼
-                                                 [approved]      [warnings only]  [errors found]
-                                                      │                 │              │
-                                                      ▼                 ▼              │
-                                                  [DONE]     [approved-with-       retry < 3?
-                                                              warnings]                │
-                                                                   │             yes   │   no
-                                                                   ▼         ──────────┘   ▼
-                                                               [DONE]  [Remove changes-   [needs-human-review]
-                                                                        requested label,       │
-                                                                        Re-dispatch Generate]  ▼
+   [Dispatch Generate]──────►[Generate Completes]──────►[Dispatch Review]
+          (stop, wait for        (workflow_run fires)                    │
+           workflow_run)                                ┌─────────────────┼──────────────┐
+                                                       │                 │              │
+                                                       ▼                 ▼              ▼
+                                                  [approved]      [warnings only]  [errors found]
+                                                       │                 │              │
+                                                       ▼                 ▼              │
+                                                   [DONE]     [approved-with-       retry < 3?
+                                                               warnings]                │
+                                                                    │             yes   │   no
+                                                                    ▼         ──────────┘   ▼
+                                                                [DONE]  [Remove changes-   [needs-human-review]
+                                                                         requested label,       │
+                                                                         Re-dispatch Generate]  ▼
                                                                               │           [ESCALATE]
                                                                               ▼
-                                                                [Generate adds review-ready label]
+                                                                [Generate Completes]
                                                                               │
-                                                                   (pull_request: labeled fires)
+                                                                   (workflow_run fires)
                                                                               │
                                                                               └──►[Dispatch Review]
 ```
