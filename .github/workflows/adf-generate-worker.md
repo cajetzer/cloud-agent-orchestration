@@ -43,6 +43,10 @@ safe-outputs:
     max: 3
   add-labels:
     max: 1
+  # Dispatch review worker directly after PR creation/update
+  dispatch-workflow:
+    workflows: [adf-review-worker]
+    max: 1
 
 engine:
   id: copilot
@@ -79,13 +83,14 @@ ${{ inputs.issue_body }}
 3. Write the pipeline file to `pipelines/<pipeline-name>.json` using `edit`
 4. Call `create_pull_request` with title and body (include `Resolves #${{ inputs.issue_number }}` in the body)
 5. Call `add_comment` on issue #${{ inputs.issue_number }} to confirm the PR was created
+6. Call `adf_review_worker` to dispatch the review worker with `issue_number: ${{ inputs.issue_number }}` (the review worker will find the PR by the issue number)
 
 ### If this is a fix cycle (`pr_number` provided):
 
 1. Use `bash` to read the current pipeline from `pipelines/` in the local checkout
 2. Apply the review feedback changes using `edit`
 3. Call `push_to_pull_request_branch` to push the fixes
-4. Call `add_labels` with label `review-ready` on PR #${{ inputs.pr_number }} to signal fixes are complete and trigger the next review
-5. Call `add_comment` on PR #${{ inputs.pr_number }} with a summary of fixes applied
+4. Call `add_comment` on PR #${{ inputs.pr_number }} with a summary of fixes applied
+5. Call `adf_review_worker` to dispatch the review worker with `pr_number: ${{ inputs.pr_number }}` and `issue_number: ${{ inputs.issue_number }}`
 
 If you cannot complete the task, call `noop` or `missing_data` to explain why.
