@@ -67,7 +67,7 @@ _Track progress in the Actions tab._
 
 Add label `generation-in-progress`.
 
-**Stop here.** The generation worker runs asynchronously. When it creates a PR labeled `adf-pipeline` and `auto-generated`, this orchestrator will be re-triggered by the `pull_request: labeled` event to continue the process.
+**Stop here.** The generation worker runs asynchronously. When it creates a PR labeled `adf-pipeline` and `auto-generated`, this orchestrator will be re-triggered by the `pull_request: opened` or `pull_request: labeled` event to continue the process.
 
 ---
 
