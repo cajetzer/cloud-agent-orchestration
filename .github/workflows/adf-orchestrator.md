@@ -20,6 +20,8 @@ safe-outputs:
     max: 3
   add-labels:
     max: 3
+  remove-labels:
+    max: 3
 
 tools:
   github:
@@ -80,8 +82,10 @@ Add label `generation-in-progress`.
 3. Check whether the pull request already has any review state labels:
    - `review-in-progress`, `changes-requested`, `approved-with-warnings`, or `approved`
    - If any of these are present, **do not** dispatch `adf-review-worker` again — proceed directly to **Step 4: Handle Review Results** below.
+   - Note: `review-ready` is **not** a blocking label — it signals that the generation worker has finished applying fixes and a new review should be dispatched.
 4. Extract the issue number from the PR body (look for `Resolves #<N>` or `Closes #<N>`)
-5. Dispatch the `adf-review-worker` workflow with inputs:
+5. Remove label `review-ready` from the PR if present (clean up the fix-cycle signal label)
+6. Dispatch the `adf-review-worker` workflow with inputs:
    - `pr_number`: The pull request number
    - `issue_number`: The issue number extracted from the PR body
 
@@ -107,6 +111,7 @@ After the review worker completes, the PR will have a review outcome label. If t
 1. Read the latest review comment to extract the specific errors
 2. Count `retry-count-N` labels on the PR to determine the current retry number
 3. If retry count < 3:
+   - Remove the `changes-requested` label from the PR (clears the blocking state so the next review dispatch can proceed)
    - Add the next `retry-count-N` label
    - Look up the linked issue to get its title and body
    - Re-dispatch `adf-generate-worker` with fix inputs:
@@ -131,29 +136,34 @@ After the review worker completes, the PR will have a review outcome label. If t
 ## Orchestration State Machine
 
 ```
-         ┌──────────────────────────────────────────────────────┐
-         │                                                      │
-         ▼                                                      │
-   [Issue Labeled]                                              │
-         │                                                      │
-         ▼                                                      │
+         ┌──────────────────────────────────────────────────────────────┐
+         │                                                              │
+         ▼                                                              │
+   [Issue Labeled]                                                     │
+         │                                                              │
+         ▼                                                              │
    [Dispatch Generate]──────►[PR Created+Labeled]──────►[Dispatch Review]
-          (stop, wait for PR)   (re-triggers orchestrator)       │
-                                                      ┌──────────┼──────────────┐
-                                                      │          │              │
-                                                      ▼          ▼              ▼
-                                                 [approved] [warnings only] [errors found]
-                                                      │          │              │
-                                                      ▼          ▼              │
-                                                  [DONE]  [approved-with-    retry < 3?
-                                                           warnings]            │
-                                                               │          yes   │   no
-                                                               ▼          ──────┘   ▼
-                                                           [DONE]    [Re-dispatch] [needs-human-review]
-                                                                      Generate        │
-                                                                      with feedback   ▼
-                                                                            │     [ESCALATE]
-                                                                            └──► (back to review)
+          (stop, wait for PR)   (re-triggers orchestrator)              │
+                                                      ┌─────────────────┼──────────────┐
+                                                      │                 │              │
+                                                      ▼                 ▼              ▼
+                                                 [approved]      [warnings only]  [errors found]
+                                                      │                 │              │
+                                                      ▼                 ▼              │
+                                                  [DONE]     [approved-with-       retry < 3?
+                                                              warnings]                │
+                                                                   │             yes   │   no
+                                                                   ▼         ──────────┘   ▼
+                                                               [DONE]  [Remove changes-   [needs-human-review]
+                                                                        requested label,       │
+                                                                        Re-dispatch Generate]  ▼
+                                                                              │           [ESCALATE]
+                                                                              ▼
+                                                                [Generate adds review-ready label]
+                                                                              │
+                                                                   (pull_request: labeled fires)
+                                                                              │
+                                                                              └──►[Dispatch Review]
 ```
 
 ## Error Handling
