@@ -1,0 +1,183 @@
+{
+  "name": "copy_blob_to_sql_sales_data",
+  "properties": {
+    "description": "Copies daily CSV sales files from Azure Blob Storage (raw-data/sales/) to the staging.sales_data table in Azure SQL Database. Truncates the target table before each load. Runs daily at 2:00 AM UTC.",
+    "activities": [
+      {
+        "name": "TruncateStagingTable",
+        "type": "Script",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.00:10:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "scripts": [
+            {
+              "type": "Query",
+              "text": "TRUNCATE TABLE staging.sales_data"
+            }
+          ],
+          "logSettings": {
+            "logDestination": "ActivityOutput"
+          }
+        },
+        "linkedServiceName": {
+          "referenceName": "@pipeline().parameters.sqlLinkedServiceName",
+          "type": "LinkedServiceReference"
+        }
+      },
+      {
+        "name": "CopySalesData",
+        "type": "Copy",
+        "dependsOn": [
+          {
+            "activity": "TruncateStagingTable",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 3,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "source": {
+            "type": "DelimitedTextSource",
+            "storeSettings": {
+              "type": "AzureBlobStorageReadSettings",
+              "recursive": false,
+              "wildcardFolderPath": {
+                "value": "@pipeline().parameters.sourceFolderPath",
+                "type": "Expression"
+              },
+              "wildcardFileName": {
+                "value": "@concat('sales_', formatDateTime(pipeline().parameters.runDate, 'yyyyMMdd'), '.csv')",
+                "type": "Expression"
+              }
+            },
+            "formatSettings": {
+              "type": "DelimitedTextReadSettings",
+              "firstRowAsHeader": true
+            }
+          },
+          "sink": {
+            "type": "AzureSqlSink",
+            "writeBehavior": "insert",
+            "sqlWriterUseTableLock": true,
+            "tableOption": "autoCreate",
+            "disableMetricsCollection": false
+          },
+          "enableStaging": false,
+          "parallelCopies": 4
+        },
+        "inputs": [
+          {
+            "referenceName": "BlobStorageSalesDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "containerName": {
+                "value": "@pipeline().parameters.sourceContainerName",
+                "type": "Expression"
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "referenceName": "SqlSalesStagingDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "schemaName": {
+                "value": "@pipeline().parameters.sinkSchemaName",
+                "type": "Expression"
+              },
+              "tableName": {
+                "value": "@pipeline().parameters.sinkTableName",
+                "type": "Expression"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "LogPipelineStatus",
+        "type": "Script",
+        "dependsOn": [
+          {
+            "activity": "CopySalesData",
+            "dependencyConditions": ["Succeeded", "Failed", "Skipped"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:05:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 15,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "scripts": [
+            {
+              "type": "Query",
+              "text": {
+                "value": "@concat('INSERT INTO ', pipeline().parameters.loggingSchemaName, '.pipeline_run_log (pipeline_name, run_id, status, rows_copied, run_date, logged_at) VALUES (''', pipeline().Pipeline, ''', ''', pipeline().RunId, ''', ''', activity('CopySalesData').Status, ''', ', string(activity('CopySalesData').output.rowsCopied), ', ''', pipeline().parameters.runDate, ''', GETUTCDATE())')",
+                "type": "Expression"
+              }
+            }
+          ]
+        },
+        "linkedServiceName": {
+          "referenceName": "@pipeline().parameters.sqlLinkedServiceName",
+          "type": "LinkedServiceReference"
+        }
+      }
+    ],
+    "parameters": {
+      "sourceContainerName": {
+        "type": "String",
+        "defaultValue": "raw-data"
+      },
+      "sourceFolderPath": {
+        "type": "String",
+        "defaultValue": "raw-data/sales"
+      },
+      "sinkSchemaName": {
+        "type": "String",
+        "defaultValue": "staging"
+      },
+      "sinkTableName": {
+        "type": "String",
+        "defaultValue": "sales_data"
+      },
+      "loggingSchemaName": {
+        "type": "String",
+        "defaultValue": "monitoring"
+      },
+      "sqlLinkedServiceName": {
+        "type": "String",
+        "defaultValue": "AzureSqlDatabase"
+      },
+      "runDate": {
+        "type": "String",
+        "defaultValue": {
+          "value": "@formatDateTime(utcNow(), 'yyyy-MM-dd')",
+          "type": "Expression"
+        }
+      }
+    },
+    "annotations": [
+      "auto-generated",
+      "copy-pipeline",
+      "sales-data-warehouse"
+    ],
+    "folder": {
+      "name": "generated"
+    }
+  }
+}
