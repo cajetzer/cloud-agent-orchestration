@@ -23,43 +23,25 @@
 #
 # Orchestrates ADF pipeline generation and review using separate worker agents
 #
-# gh-aw-metadata: {"schema_version":"v1","frontmatter_hash":"d705bb8d8ba0e87f4cb2908c1e8fb888fb50832b67726073db422216b32eff3a","compiler_version":"v0.50.1"}
+# gh-aw-metadata: {"schema_version":"v1","frontmatter_hash":"eb4bf82eddec3ea8bb2e03bc23d6692819250fcbaaf005379e0a635fe9f3f90e","compiler_version":"v0.50.1"}
 
 name: "ADF Pipeline Orchestrator"
 "on":
   issues:
     types:
     - labeled
-  pull_request:
-    types:
-    - opened
-    - labeled
-  workflow_run:
-    # zizmor: ignore[dangerous-triggers] - workflow_run trigger is secured with role and fork validation
-    branches:
-    - main
-    types:
-    - completed
-    workflows:
-    - ADF Pipeline Generation Worker
-    - ADF Pipeline Review Worker
 
 permissions: {}
 
 concurrency:
-  group: "gh-aw-${{ github.workflow }}-${{ github.event.issue.number || github.event.pull_request.number }}"
-  cancel-in-progress: true
+  group: "gh-aw-${{ github.workflow }}-${{ github.event.issue.number }}"
 
 run-name: "ADF Pipeline Orchestrator"
 
 jobs:
   activation:
     needs: pre_activation
-    # zizmor: ignore[dangerous-triggers] - workflow_run trigger is secured with role and fork validation
-    if: >
-      ((needs.pre_activation.outputs.activated == 'true') && ((github.event_name != 'pull_request') || (github.event.pull_request.head.repo.id == github.repository_id))) &&
-      ((github.event_name != 'workflow_run') || ((github.event.workflow_run.repository.id == github.repository_id) &&
-      (!(github.event.workflow_run.repository.fork))))
+    if: needs.pre_activation.outputs.activated == 'true'
     runs-on: ubuntu-slim
     permissions:
       contents: read
@@ -118,8 +100,6 @@ jobs:
           GH_AW_GITHUB_EVENT_DISCUSSION_NUMBER: ${{ github.event.discussion.number }}
           GH_AW_GITHUB_EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
           GH_AW_GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
-          GH_AW_GITHUB_EVENT_WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
-          GH_AW_GITHUB_EVENT_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
           GH_AW_GITHUB_REPOSITORY: ${{ github.repository }}
           GH_AW_GITHUB_RUN_ID: ${{ github.run_id }}
           GH_AW_GITHUB_WORKSPACE: ${{ github.workspace }}
@@ -177,8 +157,6 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           GH_AW_PROMPT: /tmp/gh-aw/aw-prompts/prompt.txt
-          GH_AW_GITHUB_EVENT_WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
-          GH_AW_GITHUB_EVENT_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
         with:
           script: |
             const { setupGlobals } = require('/opt/gh-aw/actions/setup_globals.cjs');
@@ -194,8 +172,6 @@ jobs:
           GH_AW_GITHUB_EVENT_DISCUSSION_NUMBER: ${{ github.event.discussion.number }}
           GH_AW_GITHUB_EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
           GH_AW_GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
-          GH_AW_GITHUB_EVENT_WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
-          GH_AW_GITHUB_EVENT_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
           GH_AW_GITHUB_REPOSITORY: ${{ github.repository }}
           GH_AW_GITHUB_RUN_ID: ${{ github.run_id }}
           GH_AW_GITHUB_WORKSPACE: ${{ github.workspace }}
@@ -216,8 +192,6 @@ jobs:
                 GH_AW_GITHUB_EVENT_DISCUSSION_NUMBER: process.env.GH_AW_GITHUB_EVENT_DISCUSSION_NUMBER,
                 GH_AW_GITHUB_EVENT_ISSUE_NUMBER: process.env.GH_AW_GITHUB_EVENT_ISSUE_NUMBER,
                 GH_AW_GITHUB_EVENT_PULL_REQUEST_NUMBER: process.env.GH_AW_GITHUB_EVENT_PULL_REQUEST_NUMBER,
-                GH_AW_GITHUB_EVENT_WORKFLOW_RUN_CONCLUSION: process.env.GH_AW_GITHUB_EVENT_WORKFLOW_RUN_CONCLUSION,
-                GH_AW_GITHUB_EVENT_WORKFLOW_RUN_ID: process.env.GH_AW_GITHUB_EVENT_WORKFLOW_RUN_ID,
                 GH_AW_GITHUB_REPOSITORY: process.env.GH_AW_GITHUB_REPOSITORY,
                 GH_AW_GITHUB_RUN_ID: process.env.GH_AW_GITHUB_RUN_ID,
                 GH_AW_GITHUB_WORKSPACE: process.env.GH_AW_GITHUB_WORKSPACE,
@@ -374,7 +348,7 @@ jobs:
           mkdir -p /tmp/gh-aw/safeoutputs
           mkdir -p /tmp/gh-aw/mcp-logs/safeoutputs
           cat > /opt/gh-aw/safeoutputs/config.json << 'GH_AW_SAFE_OUTPUTS_CONFIG_EOF'
-          {"add_comment":{"max":3},"add_labels":{"max":3},"dispatch_workflow":{"max":5,"workflow_files":{"adf-generate-worker":".lock.yml","adf-review-worker":".lock.yml"},"workflows":["adf-generate-worker","adf-review-worker"]},"missing_data":{},"missing_tool":{},"noop":{"max":1},"remove_labels":{"max":3}}
+          {"add_comment":{"max":3},"add_labels":{"max":3},"dispatch_workflow":{"max":2,"workflow_files":{"adf-generate-worker":".lock.yml"},"workflows":["adf-generate-worker"]},"missing_data":{},"missing_tool":{},"noop":{"max":1},"remove_labels":{"max":3}}
           GH_AW_SAFE_OUTPUTS_CONFIG_EOF
           cat > /opt/gh-aw/safeoutputs/tools.json << 'GH_AW_SAFE_OUTPUTS_TOOLS_EOF'
           [
@@ -548,29 +522,6 @@ jobs:
                 "type": "object"
               },
               "name": "adf_generate_worker"
-            },
-            {
-              "_workflow_name": "adf-review-worker",
-              "description": "Dispatch the 'adf-review-worker' workflow with workflow_dispatch trigger. This workflow must support workflow_dispatch and be in .github/workflows/ directory in the same repository.",
-              "inputSchema": {
-                "additionalProperties": false,
-                "properties": {
-                  "issue_number": {
-                    "description": "Original issue number",
-                    "type": "number"
-                  },
-                  "pr_number": {
-                    "description": "Pull request number to review",
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "issue_number",
-                  "pr_number"
-                ],
-                "type": "object"
-              },
-              "name": "adf_review_worker"
             }
           ]
           GH_AW_SAFE_OUTPUTS_TOOLS_EOF
@@ -1169,7 +1120,6 @@ jobs:
             await main();
 
   pre_activation:
-    if: (github.event_name != 'pull_request') || (github.event.pull_request.head.repo.id == github.repository_id)
     runs-on: ubuntu-slim
     outputs:
       activated: ${{ steps.check_membership.outputs.is_team_member == 'true' }}
@@ -1235,7 +1185,7 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           GH_AW_AGENT_OUTPUT: ${{ env.GH_AW_AGENT_OUTPUT }}
-          GH_AW_SAFE_OUTPUTS_HANDLER_CONFIG: "{\"add_comment\":{\"max\":3},\"add_labels\":{\"max\":3},\"dispatch_workflow\":{\"max\":5,\"workflow_files\":{\"adf-generate-worker\":\".lock.yml\",\"adf-review-worker\":\".lock.yml\"},\"workflows\":[\"adf-generate-worker\",\"adf-review-worker\"]},\"missing_data\":{},\"missing_tool\":{},\"remove_labels\":{\"max\":3}}"
+          GH_AW_SAFE_OUTPUTS_HANDLER_CONFIG: "{\"add_comment\":{\"max\":3},\"add_labels\":{\"max\":3},\"dispatch_workflow\":{\"max\":2,\"workflow_files\":{\"adf-generate-worker\":\".lock.yml\"},\"workflows\":[\"adf-generate-worker\"]},\"missing_data\":{},\"missing_tool\":{},\"remove_labels\":{\"max\":3}}"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |

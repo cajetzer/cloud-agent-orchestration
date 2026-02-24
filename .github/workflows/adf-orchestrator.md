@@ -4,12 +4,6 @@ description: "Orchestrates ADF pipeline generation and review using separate wor
 on:
   issues:
     types: [labeled]
-  pull_request:
-    types: [opened, labeled]
-  workflow_run:
-    workflows: ["ADF Pipeline Generation Worker", "ADF Pipeline Review Worker"]
-    types: [completed]
-    branches: [main]
 
 permissions:
   contents: read
@@ -18,8 +12,8 @@ permissions:
 
 safe-outputs:
   dispatch-workflow:
-    workflows: [adf-generate-worker, adf-review-worker]
-    max: 5
+    workflows: [adf-generate-worker]
+    max: 2
   add-comment:
     max: 3
   add-labels:
@@ -33,9 +27,12 @@ tools:
 
 # ADF Pipeline Orchestrator
 
-Coordinate the ADF pipeline generation and review process by dispatching work to specialized worker agents.
+Validate ADF pipeline generation requests and dispatch the generation worker.
 
-This workflow is triggered by three different events. Handle each event differently:
+> **Architecture Note**: This orchestrator handles only the initial entry point (issue validation + dispatch).
+> The workers handle subsequent handoffs directly:
+> - Generate worker → dispatches review worker after creating/updating the PR
+> - Review worker → dispatches generate worker for fix cycles (up to 3 retries), then escalates
 
 ---
 
@@ -67,131 +64,48 @@ Dispatching to ADF Generation Agent...
 - Reading requirements from this issue
 - Will generate pipeline JSON using templates
 - Will open a PR when complete
+- Review will follow automatically
 
 _Track progress in the Actions tab._
 ```
 
 Add label `generation-in-progress`.
 
-**Stop here.** The generation worker runs asynchronously. When it completes, this orchestrator will be re-triggered by the `workflow_run: completed` event to continue the process.
+**Stop here.** The generation worker runs asynchronously. When it completes, it will directly dispatch the review worker. The review worker handles fix cycles and final outcomes without needing the orchestrator to be re-triggered.
+
+If the generation worker fails, the gh-aw framework automatically creates a failure issue labeled `agentic-workflows` — no additional error handling is needed in this orchestrator.
 
 ---
 
-## When triggered by a `workflow_run` event (worker workflow completed)
-
-This event fires when either the generation or review worker workflow completes. GitHub Actions events created by `GITHUB_TOKEN` do not trigger other workflows (to prevent cascades), so PR creation and label changes by workers won't fire `pull_request` events. The `workflow_run` trigger bridges this gap.
-
-### Determine which worker completed
-
-1. Check `${{ github.event.workflow_run.conclusion }}`:
-   - If not `success`, add a comment on the linked issue or PR noting the failure, add label `workflow-error`, and stop.
-
-2. Use the GitHub API to look up the workflow run `${{ github.event.workflow_run.id }}` to determine which worker workflow completed:
-   - If the generation worker completed → Proceed to Step 3 below.
-   - If the review worker completed → Proceed to Step 4 below.
-
-### Find the relevant PR
-
-Use the GitHub API to search for the most recently opened pull request with labels `adf-pipeline` AND `auto-generated`. Use this PR for Step 3 or Step 4 below, the same as if the orchestrator had been triggered by a `pull_request` event on that PR.
-
----
-
-## When triggered by a `pull_request` event (PR opened or labeled)
-
-### Step 3: Identify the PR and Dispatch Review Worker
-
-1. Check the pull request has label `adf-pipeline` and label `auto-generated`.
-2. If either label is missing, do nothing and stop — this PR was not created by the generation worker.
-3. Check whether the pull request already has any review state labels:
-   - `review-in-progress`, `changes-requested`, `approved-with-warnings`, or `approved`
-   - If any of these are present, **do not** dispatch `adf-review-worker` again — proceed directly to **Step 4: Handle Review Results** below.
-   - Note: `review-ready` is **not** a blocking label — it signals that the generation worker has finished applying fixes and a new review should be dispatched.
-4. Extract the issue number from the PR body (look for `Resolves #<N>` or `Closes #<N>`)
-5. Remove label `review-ready` from the PR if present (clean up the fix-cycle signal label)
-6. Dispatch the `adf-review-worker` workflow with inputs:
-   - `pr_number`: The pull request number
-   - `issue_number`: The issue number extracted from the PR body
-
-Add comment on the PR:
-```
-🔍 **Pipeline Review Started**
-
-Dispatching to ADF Review Agent...
-- Will validate against best practices
-- Will check common issues knowledge base
-- Will post detailed findings
-
-_Track progress in the Actions tab._
-```
-
-Add label `review-in-progress` to the PR.
-
-### Step 4: Handle Review Results (re-triggered after review completes)
-
-After the review worker completes, the PR will have a review outcome label. If this orchestrator run is triggered on a PR that already has a review outcome label, handle it:
-
-**If label `changes-requested` is present:**
-1. Read the latest review comment to extract the specific errors
-2. Count `retry-count-N` labels on the PR to determine the current retry number
-3. If retry count < 3:
-   - Remove the `changes-requested` label from the PR (clears the blocking state so the next review dispatch can proceed)
-   - Add the next `retry-count-N` label
-   - Look up the linked issue to get its title and body
-   - Re-dispatch `adf-generate-worker` with fix inputs:
-     - `issue_number`: Original issue number
-     - `issue_title`: Original issue title
-     - `issue_body`: Original issue body
-     - `pr_number`: The existing PR number
-     - `review_feedback`: The review errors extracted from the review comment
-   - Comment on PR: "🔄 **Fix Cycle {N}/3** - Re-dispatching generation agent to address review errors."
-4. If retry count >= 3:
-   - Add label `needs-human-review`
-   - Comment: "⚠️ **Escalation** - Pipeline failed review 3 times. Human review required."
-
-**If label `approved-with-warnings` is present:**
-- Comment: "Pipeline approved with minor suggestions. Ready for human review."
-
-**If label `approved` is present:**
-- Comment: "✅ Pipeline passed all checks. Ready for human review."
-
----
-
-## Orchestration State Machine
+## Orchestration Flow
 
 ```
-         ┌──────────────────────────────────────────────────────────────┐
-         │                                                              │
-         ▼                                                              │
-   [Issue Labeled]                                                     │
-         │                                                              │
-         ▼                                                              │
-   [Dispatch Generate]──────►[Generate Completes]──────►[Dispatch Review]
-          (stop, wait for        (workflow_run fires)                    │
-           workflow_run)                                ┌─────────────────┼──────────────┐
-                                                       │                 │              │
-                                                       ▼                 ▼              ▼
-                                                  [approved]      [warnings only]  [errors found]
-                                                       │                 │              │
-                                                       ▼                 ▼              │
-                                                   [DONE]     [approved-with-       retry < 3?
-                                                               warnings]                │
-                                                                    │             yes   │   no
-                                                                    ▼         ──────────┘   ▼
-                                                                [DONE]  [Remove changes-   [needs-human-review]
-                                                                         requested label,       │
-                                                                         Re-dispatch Generate]  ▼
-                                                                              │           [ESCALATE]
-                                                                              ▼
-                                                                [Generate Completes]
-                                                                              │
-                                                                   (workflow_run fires)
-                                                                              │
-                                                                              └──►[Dispatch Review]
+[Issue Labeled]
+      │
+      ▼
+[Orchestrator validates & dispatches generate worker]
+      │
+      ▼
+[Generate Worker runs → creates PR → directly dispatches review worker]
+      │
+      ▼
+[Review Worker runs → posts findings → labels PR]
+      │
+      ├─ approved / approved-with-warnings → comments "Ready for review" → DONE
+      │
+      └─ changes-requested + retry < 3 → directly dispatches generate worker with feedback
+                  │
+                  ▼
+        [Generate Worker applies fixes → dispatches review worker]
+                  │
+                  ▼
+             [... repeat up to 3 cycles ...]
+                  │
+                  └─ retry >= 3 → adds needs-human-review label → ESCALATE
 ```
 
 ## Error Handling
 
 If any worker fails:
-- Add label `workflow-error`
-- Comment with error details
-- Tag maintainers for manual intervention
+- The gh-aw framework automatically creates a failure issue labeled `agentic-workflows`
+- Check the Actions tab for detailed logs
