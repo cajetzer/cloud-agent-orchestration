@@ -75,10 +75,13 @@ Add label `generation-in-progress`.
 
 ### Step 3: Identify the PR and Dispatch Review Worker
 
-1. Check the pull request has label `adf-pipeline` and label `auto-generated`
-2. If either label is missing, do nothing and stop — this PR was not created by the generation worker
-3. Extract the issue number from the PR body (look for `Resolves #<N>` or `Closes #<N>`)
-4. Dispatch the `adf-review-worker` workflow with inputs:
+1. Check the pull request has label `adf-pipeline` and label `auto-generated`.
+2. If either label is missing, do nothing and stop — this PR was not created by the generation worker.
+3. Check whether the pull request already has any review state labels:
+   - `review-in-progress`, `changes-requested`, `approved-with-warnings`, or `approved`
+   - If any of these are present, **do not** dispatch `adf-review-worker` again — proceed directly to **Step 4: Handle Review Results** below.
+4. Extract the issue number from the PR body (look for `Resolves #<N>` or `Closes #<N>`)
+5. Dispatch the `adf-review-worker` workflow with inputs:
    - `pr_number`: The pull request number
    - `issue_number`: The issue number extracted from the PR body
 
@@ -121,7 +124,7 @@ After the review worker completes, the PR will have a review outcome label. If t
 - Comment: "Pipeline approved with minor suggestions. Ready for human review."
 
 **If label `approved` is present:**
-- Comment: "✅ Pipeline passed all checks. Ready for merge."
+- Comment: "✅ Pipeline passed all checks. Ready for human review."
 
 ---
 
