@@ -1,0 +1,197 @@
+{
+  "name": "blob_to_sql_sales_copy",
+  "properties": {
+    "description": "Daily pipeline to copy CSV sales files from Azure Blob Storage (raw-data/sales/) into the staging.sales_data table in Azure SQL Database. Truncates the target table before each load as part of the sales data warehouse ingestion process.",
+    "activities": [
+      {
+        "name": "TruncateStagingTable",
+        "type": "Script",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.01:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "scripts": [
+            {
+              "type": "NonQuery",
+              "text": {
+                "value": "@concat('TRUNCATE TABLE ', pipeline().parameters.sinkSchema, '.', pipeline().parameters.sinkTable)",
+                "type": "Expression"
+              }
+            }
+          ],
+          "logSettings": {
+            "linkedServiceName": {
+              "referenceName": "AzureSqlLinkedService",
+              "type": "LinkedServiceReference"
+            }
+          }
+        },
+        "linkedServiceName": {
+          "referenceName": "AzureSqlLinkedService",
+          "type": "LinkedServiceReference"
+        }
+      },
+      {
+        "name": "CopySalesData",
+        "type": "Copy",
+        "dependsOn": [
+          {
+            "activity": "TruncateStagingTable",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 3,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "source": {
+            "type": "DelimitedTextSource",
+            "storeSettings": {
+              "type": "AzureBlobStorageReadSettings",
+              "recursive": false,
+              "wildcardFolderPath": {
+                "value": "@pipeline().parameters.sourceFolderPath",
+                "type": "Expression"
+              },
+              "wildcardFileName": {
+                "value": "@pipeline().parameters.sourceFilePattern",
+                "type": "Expression"
+              },
+              "enablePartitionDiscovery": false
+            },
+            "formatSettings": {
+              "type": "DelimitedTextReadSettings",
+              "firstRowAsHeader": true
+            }
+          },
+          "sink": {
+            "type": "AzureSqlSink",
+            "writeBehavior": "insert",
+            "sqlWriterUseTableLock": false,
+            "disableMetricsCollection": false
+          },
+          "enableStaging": false,
+          "translator": {
+            "type": "TabularTranslator",
+            "typeConversion": true,
+            "typeConversionSettings": {
+              "allowDataTruncation": true,
+              "treatBooleanAsNumber": false
+            }
+          }
+        },
+        "inputs": [
+          {
+            "referenceName": "BlobSalesCsvDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "containerName": {
+                "value": "@pipeline().parameters.sourceContainer",
+                "type": "Expression"
+              },
+              "folderPath": {
+                "value": "@pipeline().parameters.sourceFolderPath",
+                "type": "Expression"
+              },
+              "filePattern": {
+                "value": "@pipeline().parameters.sourceFilePattern",
+                "type": "Expression"
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "referenceName": "SqlStagingSalesDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "schemaName": {
+                "value": "@pipeline().parameters.sinkSchema",
+                "type": "Expression"
+              },
+              "tableName": {
+                "value": "@pipeline().parameters.sinkTable",
+                "type": "Expression"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "LogPipelineStatus",
+        "type": "Script",
+        "dependsOn": [
+          {
+            "activity": "CopySalesData",
+            "dependencyConditions": ["Succeeded", "Failed"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:30:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 15,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "scripts": [
+            {
+              "type": "NonQuery",
+              "text": {
+                "value": "@concat('INSERT INTO ', pipeline().parameters.loggingSchema, '.pipeline_run_log (pipeline_name, run_id, status, rows_copied, run_time_utc) VALUES (''', pipeline().Pipeline, ''', ''', pipeline().RunId, ''', ''', if(equals(activity('CopySalesData').Status, 'Succeeded'), 'SUCCESS', 'FAILED'), ''', ', string(activity('CopySalesData').output.rowsCopied), ', GETUTCDATE())')",
+                "type": "Expression"
+              }
+            }
+          ]
+        },
+        "linkedServiceName": {
+          "referenceName": "AzureSqlLinkedService",
+          "type": "LinkedServiceReference"
+        }
+      }
+    ],
+    "parameters": {
+      "sourceContainer": {
+        "type": "String",
+        "defaultValue": "raw-data"
+      },
+      "sourceFolderPath": {
+        "type": "String",
+        "defaultValue": "sales"
+      },
+      "sourceFilePattern": {
+        "type": "String",
+        "defaultValue": "sales_*.csv"
+      },
+      "sinkSchema": {
+        "type": "String",
+        "defaultValue": "staging"
+      },
+      "sinkTable": {
+        "type": "String",
+        "defaultValue": "sales_data"
+      },
+      "loggingSchema": {
+        "type": "String",
+        "defaultValue": "monitoring"
+      }
+    },
+    "annotations": [
+      "auto-generated",
+      "copy-pipeline",
+      "sales-ingestion"
+    ],
+    "folder": {
+      "name": "generated"
+    }
+  }
+}
