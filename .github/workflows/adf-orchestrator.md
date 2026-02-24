@@ -4,6 +4,8 @@ description: "Orchestrates ADF pipeline generation and review using separate wor
 on:
   issues:
     types: [labeled]
+  pull_request:
+    types: [opened, labeled]
 
 permissions:
   contents: read
@@ -27,31 +29,15 @@ tools:
 
 Coordinate the ADF pipeline generation and review process by dispatching work to specialized worker agents.
 
-## Activation
+This workflow is triggered by two different events. Handle each event differently:
 
-Only process issues that have the `adf-pipeline` label.
+---
 
-## Orchestration Flow
+## When triggered by an `issues` event (issue labeled)
 
-```
-Issue (adf-pipeline label)
-    │
-    ├─► Dispatch: adf-generate-worker
-    │       │
-    │       └─► Creates pipeline JSON, opens draft PR
-    │
-    └─► When PR ready, Dispatch: adf-review-worker
-            │
-            └─► Reviews pipeline, posts findings
-                    │
-                    ├─► If errors: Comment with fix instructions
-                    │
-                    └─► If clean: Label PR as approved
-```
+### Step 1: Validate Issue
 
-## Step 1: Validate Issue
-
-1. Check the issue has label `adf-pipeline`
+1. Check the issue has label `adf-generate` (the label used to trigger pipeline generation in this repo) or `adf-pipeline`
 2. Read the issue title and body
 3. Validate it contains pipeline requirements (source, sink, or transformation description)
 
@@ -60,7 +46,7 @@ If requirements are missing or unclear:
 - Add label `needs-clarification`
 - Stop orchestration
 
-## Step 2: Dispatch Generation Worker
+### Step 2: Dispatch Generation Worker
 
 Dispatch the `adf-generate-worker` workflow with inputs:
 - `issue_number`: The issue number
@@ -81,21 +67,22 @@ _Track progress in the Actions tab._
 
 Add label `generation-in-progress`.
 
-## Step 3: Monitor for PR Creation
+**Stop here.** The generation worker runs asynchronously. When it creates a PR labeled `adf-pipeline` and `auto-generated`, this orchestrator will be re-triggered by the `pull_request: labeled` event to continue the process.
 
-The generation worker will create a PR. When a PR is created that:
-- References this issue (`Resolves #<issue_number>`)
-- Has label `adf-pipeline`
+---
 
-Then dispatch the review worker.
+## When triggered by a `pull_request` event (PR opened or labeled)
 
-## Step 4: Dispatch Review Worker
+### Step 3: Identify the PR and Dispatch Review Worker
 
-Dispatch the `adf-review-worker` workflow with inputs:
-- `pr_number`: The pull request number
-- `issue_number`: The original issue number
+1. Check the pull request has label `adf-pipeline` and label `auto-generated`
+2. If either label is missing, do nothing and stop — this PR was not created by the generation worker
+3. Extract the issue number from the PR body (look for `Resolves #<N>` or `Closes #<N>`)
+4. Dispatch the `adf-review-worker` workflow with inputs:
+   - `pr_number`: The pull request number
+   - `issue_number`: The issue number extracted from the PR body
 
-Add comment on PR:
+Add comment on the PR:
 ```
 🔍 **Pipeline Review Started**
 
@@ -107,33 +94,36 @@ Dispatching to ADF Review Agent...
 _Track progress in the Actions tab._
 ```
 
-Remove label `generation-in-progress`, add label `review-in-progress`.
+Add label `review-in-progress` to the PR.
 
-## Step 5: Handle Review Results
+### Step 4: Handle Review Results (re-triggered after review completes)
 
-Based on review worker output:
+After the review worker completes, the PR will have a review outcome label. If this orchestrator run is triggered on a PR that already has a review outcome label, handle it:
 
-**If errors found (label: `changes-requested`):**
-1. Read the review comment to extract the specific errors
-2. Track retry count (check for `retry-count-N` labels)
+**If label `changes-requested` is present:**
+1. Read the latest review comment to extract the specific errors
+2. Count `retry-count-N` labels on the PR to determine the current retry number
 3. If retry count < 3:
-   - Increment retry label (`retry-count-1` → `retry-count-2`)
+   - Add the next `retry-count-N` label
+   - Look up the linked issue to get its title and body
    - Re-dispatch `adf-generate-worker` with fix inputs:
-     - `issue_number`: Original issue
-     - `issue_title`: Original title
-     - `issue_body`: Original body
-     - `pr_number`: **The existing PR number**
-     - `review_feedback`: **The review errors to fix**
-   - Comment: "🔄 **Fix Cycle {N}/3** - Re-dispatching generation agent to address errors."
+     - `issue_number`: Original issue number
+     - `issue_title`: Original issue title
+     - `issue_body`: Original issue body
+     - `pr_number`: The existing PR number
+     - `review_feedback`: The review errors extracted from the review comment
+   - Comment on PR: "🔄 **Fix Cycle {N}/3** - Re-dispatching generation agent to address review errors."
 4. If retry count >= 3:
    - Add label `needs-human-review`
    - Comment: "⚠️ **Escalation** - Pipeline failed review 3 times. Human review required."
 
-**If warnings only (label: `approved-with-warnings`):**
+**If label `approved-with-warnings` is present:**
 - Comment: "Pipeline approved with minor suggestions. Ready for human review."
 
-**If clean (label: `approved`):**
+**If label `approved` is present:**
 - Comment: "✅ Pipeline passed all checks. Ready for merge."
+
+---
 
 ## Orchestration State Machine
 
@@ -141,34 +131,26 @@ Based on review worker output:
          ┌──────────────────────────────────────────────────────┐
          │                                                      │
          ▼                                                      │
-   [Issue Created]                                              │
+   [Issue Labeled]                                              │
          │                                                      │
          ▼                                                      │
-   [Dispatch Generate]──────►[PR Created]──────►[Dispatch Review]
-                                                      │
-                              ┌────────────────────────┼─────────────────┐
-                              │                        │                 │
-                              ▼                        ▼                 ▼
-                         [approved]           [warnings only]      [errors found]
-                              │                        │                 │
-                              ▼                        ▼                 │
-                          [DONE]              [approved-with-warnings]   │
-                                                      │                 │
-                                                      ▼                 │
-                                                   [DONE]               │
-                                                                        │
-                              ┌──────────────────────────────────────────┘
-                              │
-                              ▼
-                        retry < 3? ──yes──► [Re-dispatch Generate with feedback]
-                              │                        │
-                              no                       │
-                              │                        └───────────────────┘
-                              ▼                              (back to review)
-                    [needs-human-review]
-                              │
-                              ▼
-                          [ESCALATE]
+   [Dispatch Generate]──────►[PR Created+Labeled]──────►[Dispatch Review]
+          (stop, wait for PR)   (re-triggers orchestrator)       │
+                                                      ┌──────────┼──────────────┐
+                                                      │          │              │
+                                                      ▼          ▼              ▼
+                                                 [approved] [warnings only] [errors found]
+                                                      │          │              │
+                                                      ▼          ▼              │
+                                                  [DONE]  [approved-with-    retry < 3?
+                                                           warnings]            │
+                                                               │          yes   │   no
+                                                               ▼          ──────┘   ▼
+                                                           [DONE]    [Re-dispatch] [needs-human-review]
+                                                                      Generate        │
+                                                                      with feedback   ▼
+                                                                            │     [ESCALATE]
+                                                                            └──► (back to review)
 ```
 
 ## Error Handling
