@@ -23,7 +23,7 @@
 #
 # Orchestrates ADF pipeline generation and review using separate worker agents
 #
-# gh-aw-metadata: {"schema_version":"v1","frontmatter_hash":"18ed8864acefbba704c615b47b619556c75ddd150d916609fd3ec3cfe1df0307","compiler_version":"v0.50.1"}
+# gh-aw-metadata: {"schema_version":"v1","frontmatter_hash":"d705bb8d8ba0e87f4cb2908c1e8fb888fb50832b67726073db422216b32eff3a","compiler_version":"v0.50.1"}
 
 name: "ADF Pipeline Orchestrator"
 "on":
@@ -34,6 +34,15 @@ name: "ADF Pipeline Orchestrator"
     types:
     - opened
     - labeled
+  workflow_run:
+    # zizmor: ignore[dangerous-triggers] - workflow_run trigger is secured with role and fork validation
+    branches:
+    - main
+    types:
+    - completed
+    workflows:
+    - ADF Pipeline Generation Worker
+    - ADF Pipeline Review Worker
 
 permissions: {}
 
@@ -46,8 +55,11 @@ run-name: "ADF Pipeline Orchestrator"
 jobs:
   activation:
     needs: pre_activation
+    # zizmor: ignore[dangerous-triggers] - workflow_run trigger is secured with role and fork validation
     if: >
-      (needs.pre_activation.outputs.activated == 'true') && ((github.event_name != 'pull_request') || (github.event.pull_request.head.repo.id == github.repository_id))
+      ((needs.pre_activation.outputs.activated == 'true') && ((github.event_name != 'pull_request') || (github.event.pull_request.head.repo.id == github.repository_id))) &&
+      ((github.event_name != 'workflow_run') || ((github.event.workflow_run.repository.id == github.repository_id) &&
+      (!(github.event.workflow_run.repository.fork))))
     runs-on: ubuntu-slim
     permissions:
       contents: read
@@ -106,6 +118,8 @@ jobs:
           GH_AW_GITHUB_EVENT_DISCUSSION_NUMBER: ${{ github.event.discussion.number }}
           GH_AW_GITHUB_EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
           GH_AW_GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+          GH_AW_GITHUB_EVENT_WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          GH_AW_GITHUB_EVENT_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
           GH_AW_GITHUB_REPOSITORY: ${{ github.repository }}
           GH_AW_GITHUB_RUN_ID: ${{ github.run_id }}
           GH_AW_GITHUB_WORKSPACE: ${{ github.workspace }}
@@ -163,6 +177,8 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           GH_AW_PROMPT: /tmp/gh-aw/aw-prompts/prompt.txt
+          GH_AW_GITHUB_EVENT_WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          GH_AW_GITHUB_EVENT_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
         with:
           script: |
             const { setupGlobals } = require('/opt/gh-aw/actions/setup_globals.cjs');
@@ -178,6 +194,8 @@ jobs:
           GH_AW_GITHUB_EVENT_DISCUSSION_NUMBER: ${{ github.event.discussion.number }}
           GH_AW_GITHUB_EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
           GH_AW_GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+          GH_AW_GITHUB_EVENT_WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          GH_AW_GITHUB_EVENT_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
           GH_AW_GITHUB_REPOSITORY: ${{ github.repository }}
           GH_AW_GITHUB_RUN_ID: ${{ github.run_id }}
           GH_AW_GITHUB_WORKSPACE: ${{ github.workspace }}
@@ -198,6 +216,8 @@ jobs:
                 GH_AW_GITHUB_EVENT_DISCUSSION_NUMBER: process.env.GH_AW_GITHUB_EVENT_DISCUSSION_NUMBER,
                 GH_AW_GITHUB_EVENT_ISSUE_NUMBER: process.env.GH_AW_GITHUB_EVENT_ISSUE_NUMBER,
                 GH_AW_GITHUB_EVENT_PULL_REQUEST_NUMBER: process.env.GH_AW_GITHUB_EVENT_PULL_REQUEST_NUMBER,
+                GH_AW_GITHUB_EVENT_WORKFLOW_RUN_CONCLUSION: process.env.GH_AW_GITHUB_EVENT_WORKFLOW_RUN_CONCLUSION,
+                GH_AW_GITHUB_EVENT_WORKFLOW_RUN_ID: process.env.GH_AW_GITHUB_EVENT_WORKFLOW_RUN_ID,
                 GH_AW_GITHUB_REPOSITORY: process.env.GH_AW_GITHUB_REPOSITORY,
                 GH_AW_GITHUB_RUN_ID: process.env.GH_AW_GITHUB_RUN_ID,
                 GH_AW_GITHUB_WORKSPACE: process.env.GH_AW_GITHUB_WORKSPACE,
