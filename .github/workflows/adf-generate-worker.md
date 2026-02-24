@@ -41,6 +41,8 @@ safe-outputs:
   push-to-pull-request-branch:
   add-comment:
     max: 3
+  add-labels:
+    max: 1
 
 engine:
   id: copilot
@@ -83,6 +85,7 @@ ${{ inputs.issue_body }}
 1. Use `bash` to read the current pipeline from `pipelines/` in the local checkout
 2. Apply the review feedback changes using `edit`
 3. Call `push_to_pull_request_branch` to push the fixes
-4. Call `add_comment` on PR #${{ inputs.pr_number }} with a summary of fixes applied
+4. Call `add_labels` with label `review-ready` on PR #${{ inputs.pr_number }} to signal fixes are complete and trigger the next review
+5. Call `add_comment` on PR #${{ inputs.pr_number }} with a summary of fixes applied
 
 If you cannot complete the task, call `noop` or `missing_data` to explain why.
