@@ -88,10 +88,13 @@ ${{ inputs.issue_body }}
 
 ### If this is a fix cycle (`pr_number` provided and greater than 0):
 
-1. Use `bash` to read the current pipeline from `pipelines/` in the local checkout (the PR branch should already be checked out). If the file is not found locally, read it from the GitHub API: `GET /repos/{owner}/{repo}/contents/pipelines/<filename>?ref=<pr-head-branch>` and write it to `pipelines/` using `edit` before making changes.
-2. Apply the review feedback changes using `edit`
-3. Call `push_to_pull_request_branch` with `pull_request_number: ${{ inputs.pr_number }}` to push the fixes
-4. Call `add_comment` on PR #${{ inputs.pr_number }} with a summary of fixes applied
-5. Call `adf_review_worker` to dispatch the review worker with `pr_number: ${{ inputs.pr_number }}` and `issue_number: ${{ inputs.issue_number }}`
+1. **Switch to the PR branch first.** The workspace defaults to `main`, which does not have the pipeline files. Use `bash` to fetch and checkout the PR's head branch:
+   - Run: `git fetch origin pull/${{ inputs.pr_number }}/head:pr-branch && git checkout pr-branch`
+   - This ensures the existing pipeline file from the PR is in `pipelines/` before you edit it.
+2. Use `bash` to read the current pipeline from `pipelines/` in the local checkout
+3. Apply the review feedback changes using `edit`
+4. Call `push_to_pull_request_branch` with `pull_request_number: ${{ inputs.pr_number }}` to push the fixes
+5. Call `add_comment` on PR #${{ inputs.pr_number }} with a summary of fixes applied
+6. Call `adf_review_worker` to dispatch the review worker with `pr_number: ${{ inputs.pr_number }}` and `issue_number: ${{ inputs.issue_number }}`
 
 If you cannot complete the task, call `noop` or `missing_data` to explain why.
