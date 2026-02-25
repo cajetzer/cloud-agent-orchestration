@@ -361,53 +361,6 @@ tools:
 
 7. **Test it**: Create an issue describing a pipeline, add the `adf-pipeline` label
 > 📌 **Hint:** use the `examples\sample-issue.md` or ask Copilot to create the issue with the `/create-test-issue` saved prompt.
-
-
-### Running Manually
-
-```bash
-# Trigger the orchestrator manually
-gh aw run adf-orchestrator
-
-# Check workflow status
-gh aw status
-```
-
----
-
-## Repository Structure
-
-```
-├── .github/
-│   ├── agents/                            # Custom agents (manually assignable)
-│   │   ├── adf-generate.agent.md          # Pipeline generation agent
-│   │   ├── adf-review.agent.md            # Pipeline review agent
-│   │   └── agentic-workflows.agent.md     # gh-aw workflow helper (dispatcher)
-│   ├── aw/
-│   │   └── actions-lock.json              # Pinned Actions used by compiled workflows
-│   ├── copilot-instructions.md            # Repo-level Copilot instructions
-│   ├── prompts/
-│   │   └── create-test-issue.prompt.md    # Reusable prompt for creating test issues
-│   └── workflows/                         # Agentic workflows (automated)
-│       ├── adf-orchestrator.md            # Orchestrator (coordinates workers)
-│       ├── adf-generate-worker.md         # Invokes generate agent
-│       ├── adf-review-worker.md           # Invokes review agent + KB
-│       ├── copilot-setup-steps.yml        # Environment setup for Coding Agent
-│       └── *.lock.yml                     # Compiled workflows (generated)
-├── templates/                             # ADF pipeline JSON templates
-│   ├── copy_activity.json
-│   └── dataflow_activity.json
-├── rules/
-│   ├── best_practices.json                # Review rules
-│   └── common_issues.json                 # Knowledge base for review agent
-├── examples/
-│   └── sample-issue.md                    # Example issue to try
-├── .env.example                           # Local dev environment template
-├── AGENTS.md                              # Repo-wide agent instructions
-├── copilot-setup-steps.md                 # Coding Agent environment setup
-└── README.md
-```
-
 ---
 
 ## Key Concepts used in this Example
@@ -551,6 +504,41 @@ To debug a failure:
 2. Click the workflow run URL
 3. Expand the `agent` job logs
 4. Look for error messages or missing tool calls
+
+---
+
+## Repository Structure
+
+```
+├── .github/
+│   ├── agents/                            # Custom agents (manually assignable)
+│   │   ├── adf-generate.agent.md          # Pipeline generation agent
+│   │   ├── adf-review.agent.md            # Pipeline review agent
+│   │   └── agentic-workflows.agent.md     # gh-aw workflow helper (dispatcher)
+│   ├── aw/
+│   │   └── actions-lock.json              # Pinned Actions used by compiled workflows
+│   ├── copilot-instructions.md            # Repo-level Copilot instructions
+│   ├── prompts/
+│   │   └── create-test-issue.prompt.md    # Reusable prompt for creating test issues
+│   └── workflows/                         # Agentic workflows (automated)
+│       ├── adf-orchestrator.md            # Orchestrator (coordinates workers)
+│       ├── adf-generate-worker.md         # Invokes generate agent
+│       ├── adf-review-worker.md           # Invokes review agent + KB
+│       ├── copilot-setup-steps.yml        # Environment setup for Coding Agent
+│       └── *.lock.yml                     # Compiled workflows (generated)
+├── templates/                             # ADF pipeline JSON templates
+│   ├── copy_activity.json
+│   └── dataflow_activity.json
+├── rules/
+│   ├── best_practices.json                # Review rules
+│   └── common_issues.json                 # Knowledge base for review agent
+├── examples/
+│   └── sample-issue.md                    # Example issue to try
+├── .env.example                           # Local dev environment template
+├── AGENTS.md                              # Repo-wide agent instructions
+├── copilot-setup-steps.md                 # Coding Agent environment setup
+└── README.md
+```
 
 ---
 
