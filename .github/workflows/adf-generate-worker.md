@@ -56,7 +56,7 @@ engine:
 tools:
   github:
   edit:
-  bash: ["jq", "mkdir"]
+  bash: ["jq", "mkdir", "git fetch"]
 ---
 
 # ADF Pipeline Generation Worker

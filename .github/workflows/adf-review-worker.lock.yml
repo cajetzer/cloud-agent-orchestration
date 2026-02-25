@@ -559,9 +559,9 @@ jobs:
                   }
                 },
                 "required": [
+                  "issue_body",
                   "issue_number",
-                  "issue_title",
-                  "issue_body"
+                  "issue_title"
                 ],
                 "type": "object"
               },
