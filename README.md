@@ -37,6 +37,8 @@ This includes:
 
 ## 📚 Foundational Concepts
 
+
+
 ### What is Copilot Coding Agent?
 
 **Copilot Coding Agent** is an AI-powered software engineering agent that can autonomously work on GitHub issues and pull requests. Unlike Copilot Chat (which responds to questions) or Copilot code completion (which suggests code as you type), the Coding Agent:
@@ -55,7 +57,9 @@ This includes:
 - **When to activate** — What types of issues/PRs the agent handles
 - **What to do** — Step-by-step instructions for the agent
 - **What tools to use** — Templates, rules, and reference files
-- **How to hand off** — When to pass work to another agent or human (not yet supported in cloud agents at publish time)
+- **How to hand off** — When to pass work to another agent or human
+
+>**Note: When to activate and handoff are not yet supported in cloud Coding Agent at the time of this publish, although they are supported in some local IDE agents.**
 
 ```markdown
 # Example: .github/agents/my-agent.agent.md
@@ -70,7 +74,6 @@ tools: ["read", "edit", "search"]
 2. Do the task
 3. Create a PR with results
 ```
-
 > 📖 **Learn more:** [Customizing Copilot coding agent](https://docs.github.com/en/copilot/customizing-copilot/customizing-the-behavior-of-copilot-coding-agent)
 
 ### How Does Agent Assignment Work Today?
@@ -136,32 +139,25 @@ The workflows in `.github/workflows/` attempt to provide **automated** agent orc
 
 ### 1. Orchestrator (`adf-orchestrator.md`)
 
-**Role**: Coordinator that dispatches work to specialized workers and manages the fix cycle
+**Role**: Entry point — validates issue and dispatches the generation worker. Workers self-chain after this.
 
 ```yaml
 safe-outputs:
   dispatch-workflow:
-    workflows: [adf-generate-worker, adf-review-worker]
-    max: 5
-  add-comment:
-    max: 3
-  add-labels:
-    max: 3
-
-tools:
-  github:
+    workflows: [adf-generate-worker]
+    max: 2
 ```
 
 **Responsibilities**:
 - Validates issue requirements
 - Dispatches generation worker with issue context
-- Dispatches review worker with PR context
-- **Manages fix cycles**: Re-dispatches generation with review feedback (up to 3x)
-- Escalates to human review after 3 failed cycles
+- Stops — the workers handle all subsequent handoffs directly
+
+> **Why workers self-chain?** GitHub Actions has a key limitation: workflows dispatched via `GITHUB_TOKEN` do not fire `workflow_run` events that can re-trigger other workflows. Since gh-aw's `dispatch-workflow` safe output uses `GITHUB_TOKEN` by default, the `workflow_run` trigger cannot be used for worker-to-orchestrator callbacks. Instead, each worker directly dispatches the next step using `dispatch-workflow`.
 
 ### 2. Generation Worker (`adf-generate-worker.md`)
 
-**Role**: Invokes the ADF Generate agent for both initial generation AND fix cycles
+**Role**: Invokes the ADF Generate agent for both initial generation AND fix cycles. Directly dispatches the review worker when done.
 
 ```yaml
 # Inputs determine mode:
@@ -184,35 +180,36 @@ tools:
 safe-outputs:
   create-pull-request: ...        # Used in INITIAL mode
   push-to-pull-request-branch: ...  # Used in FIX mode (updates existing PR)
-  add-comment: ...                # Status updates on issue/PR
+  dispatch-workflow:              # NEW: directly chains to review worker
+    workflows: [adf-review-worker]
 ```
 
 **Two Modes**:
 | Mode | Trigger | Action |
 |------|---------|--------|
-| **Initial** | No `pr_number` | Creates new PR with pipeline JSON |
-| **Fix** | `pr_number` provided | Commits fixes to existing PR branch |
+| **Initial** | No `pr_number` | Creates new PR → dispatches review worker with `issue_number` |
+| **Fix** | `pr_number` provided | Commits fixes to PR → dispatches review worker with `pr_number` |
 
 ### 3. Review Worker (`adf-review-worker.md`)
 
-**Role**: Invokes the ADF Review agent with knowledge base access
+**Role**: Invokes the ADF Review agent. Handles fix cycle dispatch directly.
 
 ```yaml
-engine:
-  id: copilot
-  agent: adf-review  # References .github/agents/adf-review.agent.md
-
-tools:
-  github:
-  bash: ["jq", "cat"]  # For reading knowledge base JSON
-
 safe-outputs:
-  add-comment:                       # Post review findings
-  add-labels:                        # approved / changes-requested / approved-with-warnings
-  create-pull-request-review-comment: # Inline review comments on PR
+  dispatch-workflow:              # NEW: directly chains to generate worker for fix cycles
+    workflows: [adf-generate-worker]
+  remove-labels:                  # For removing changes-requested after fix dispatch
 ```
 
-The review agent reads `rules/common_issues.json` directly for domain knowledge. In production, this could be replaced with an MCP server, external API, or vector database.
+**Post-review actions** (handled directly by the review worker):
+| Outcome | Action |
+|---------|--------|
+| `approved` | Posts "Ready for review" comment |
+| `approved-with-warnings` | Posts "Ready with suggestions" comment |
+| `changes-requested` + retry < 3 | Removes label → dispatches generate worker with feedback |
+| `changes-requested` + retry >= 3 | Adds `needs-human-review` label → escalates |
+
+The review agent reads `rules/common_issues.json` directly for domain knowledge.
 
 #### The Review Agent's Knowledge Base
 
@@ -257,41 +254,65 @@ tools:
 ```
 
 ### Architecture: Multi-Agent Orchestration
+> **Key Design Pattern**: Workers use **direct `dispatch-workflow` calls** to chain to the next step. This avoids the `workflow_run` trigger limitation where workflows dispatched via `GITHUB_TOKEN` do not fire `workflow_run` events in other workflows.
 
-```mermaid
-flowchart TD
-    Issue["🎫 GitHub Issue\nLabel: adf-pipeline"]
-    Orchestrator["🎯 ADF ORCHESTRATOR\nadf-orchestrator.md"]
-    GenWorker["⚙️ GENERATION WORKER\nadf-generate-worker.md"]
-    RevWorker["🔍 REVIEW WORKER\nadf-review-worker.md"]
-    PR["📋 Pull Request"]
-    Approved["✅ Done"]
-    Warnings["✅ Done\n(with suggestions)"]
-    Decision{{"< 3 cycles?"}}
-    Escalate["🚨 Escalate\nto human"]
-
-    Issue -->|"Issue labeled\ntriggers orchestrator"| Orchestrator
-    Orchestrator -->|"dispatch-workflow"| GenWorker
-    Orchestrator -->|"dispatch-workflow"| RevWorker
-    GenWorker --> PR
-    RevWorker --> PR
-    PR -->|"approved"| Approved
-    PR -->|"warnings only"| Warnings
-    PR -->|"errors found"| Decision
-    Decision -->|"Yes"| GenWorker
-    Decision -->|"No"| Escalate
-
-    subgraph gen ["Generation Worker"]
-        direction TB
-        GenWorker
-        GenModes["Modes: Initial (Create PR) · Fix (Update PR)\nTools: github, edit, bash"]
-    end
-
-    subgraph rev ["Review Worker"]
-        direction TB
-        RevWorker
-        RevDetails["Invokes: adf-review.agent.md\nTools: github, bash + Knowledge Base JSON"]
-    end
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         GitHub Issue                            │
+│  "Create a pipeline to copy data from Blob to SQL Database"     │
+│  Label: adf-pipeline                                            │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │  Issue labeled triggers orchestrator
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     ADF ORCHESTRATOR                            │
+│                  adf-orchestrator.md                            │
+│                                                                 │
+│  1. Validate issue has requirements                             │
+│  2. Dispatch generation worker (then stops — workers self-chain)│
+└─────────────────────────────────────────────────────────────────┘
+          │
+          │ dispatch-workflow
+          ▼
+┌─────────────────────────┐
+│   GENERATION WORKER     │
+│ adf-generate-worker.md  │
+│                         │
+│ Modes:                  │
+│ • Initial: Create PR    │──────────────────────────────────────┐
+│ • Fix: Update PR        │──────────────────────────────────────┐
+│                         │                                      │
+│ Tools: github, edit,    │                                      │
+│        bash [jq]        │                                      │
+└─────────────────────────┘                                      │
+                                      dispatch-workflow          │
+                                      (with issue_number)        │
+                                               │                 │
+                                               ▼                 │
+                              ┌─────────────────────────────┐    │
+                              │      REVIEW WORKER          │    │
+                              │  adf-review-worker.md       │    │
+                              │                             │    │
+                              │ Invokes:                    │    │
+                              │  adf-review.agent.md        │    │
+                              │                             │    │
+                              │ Tools: github, bash         │    │
+                              │ + Knowledge Base JSON       │    │
+                              └─────────────────────────────┘    │
+                                               │                 │
+                               ┌───────────────┼──────────┐      │
+                               ▼               ▼          ▼      │
+                          [approved]    [warnings]  [errors]      │
+                               │               │          │       │
+                               ▼               ▼          │       │
+                             Done            Done    dispatch-workflow
+                                                    (with pr_number
+                                                     + review_feedback)
+                                                          │       │
+                                                          └───────┘
+                                                     [Fix Cycle]
+                                              (up to 3x, then escalate)
 ```
 ---
 
@@ -492,6 +513,9 @@ Inside a workflow run, expand the **`agent`** job to see:
 | "No safe outputs generated" | Agent didn't call safe-output tools | Check workflow instructions |
 | Workflow compiles but agent does nothing | Missing tool permissions | Check `tools:` in frontmatter |
 | "dispatch-workflow: workflow must be compiled first" | Lock file missing | Run `gh aw compile` and commit |
+| Review worker never triggered | `workflow_run` doesn't fire for `GITHUB_TOKEN` dispatches | ✅ Fixed: workers now use direct `dispatch-workflow` |
+
+> **Known GitHub Actions Limitation**: The `workflow_run` trigger does NOT fire when the triggering workflow was dispatched via `GITHUB_TOKEN`. Only `workflow_dispatch` and `repository_dispatch` are exceptions to this rule. This is why this repo uses direct `dispatch-workflow` calls between workers instead of relying on `workflow_run` for worker-to-worker handoffs.
 
 ### Debugging with gh aw CLI
 
