@@ -86,9 +86,9 @@ ${{ inputs.issue_body }}
 5. Call `add_comment` on issue #${{ inputs.issue_number }} to confirm the PR was created
 6. Call `adf_review_worker` to dispatch the review worker with `issue_number: ${{ inputs.issue_number }}` (the review worker will find the PR by the issue number)
 
-### If this is a fix cycle (`pr_number` provided):
+### If this is a fix cycle (`pr_number` provided and greater than 0):
 
-1. Use `bash` to read the current pipeline from `pipelines/` in the local checkout
+1. Use `bash` to read the current pipeline from `pipelines/` in the local checkout (the PR branch should already be checked out). If the file is not found locally, read it from the GitHub API: `GET /repos/{owner}/{repo}/contents/pipelines/<filename>?ref=<pr-head-branch>` and write it to `pipelines/` using `edit` before making changes.
 2. Apply the review feedback changes using `edit`
 3. Call `push_to_pull_request_branch` with `pull_request_number: ${{ inputs.pr_number }}` to push the fixes
 4. Call `add_comment` on PR #${{ inputs.pr_number }} with a summary of fixes applied

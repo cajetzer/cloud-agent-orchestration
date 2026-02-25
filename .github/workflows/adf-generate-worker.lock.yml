@@ -292,11 +292,11 @@ jobs:
           echo "Git configured with standard GitHub Actions identity"
       - name: Checkout PR branch
         id: checkout-pr
-        if: |
-          github.event.pull_request
+        if: github.event.pull_request || inputs.pr_number
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           GH_TOKEN: ${{ secrets.GH_AW_GITHUB_MCP_SERVER_TOKEN || secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_AW_INPUTS_PR_NUMBER: ${{ inputs.pr_number }}
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_MCP_SERVER_TOKEN || secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
