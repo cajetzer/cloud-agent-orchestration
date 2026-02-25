@@ -37,8 +37,9 @@ safe-outputs:
     title-prefix: "[ADF Pipeline] "
     labels: [adf-pipeline, auto-generated]
     base-branch: main
-  # For fix cycles: push commits to existing PR branch
+  # For fix cycles: push commits to existing PR branch (target "*" allows agent to provide pr_number via workflow_dispatch)
   push-to-pull-request-branch:
+    target: "*"
   add-comment:
     max: 3
   add-labels:
@@ -89,7 +90,7 @@ ${{ inputs.issue_body }}
 
 1. Use `bash` to read the current pipeline from `pipelines/` in the local checkout
 2. Apply the review feedback changes using `edit`
-3. Call `push_to_pull_request_branch` to push the fixes
+3. Call `push_to_pull_request_branch` with `pull_request_number: ${{ inputs.pr_number }}` to push the fixes
 4. Call `add_comment` on PR #${{ inputs.pr_number }} with a summary of fixes applied
 5. Call `adf_review_worker` to dispatch the review worker with `pr_number: ${{ inputs.pr_number }}` and `issue_number: ${{ inputs.issue_number }}`
 
