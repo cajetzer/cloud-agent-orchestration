@@ -1,0 +1,241 @@
+{
+  "name": "incremental_cosmosdb_to_adx_iot",
+  "properties": {
+    "description": "Incremental load of IoT device telemetry from Azure Cosmos DB change feed to Azure Data Explorer (Kusto) every 15 minutes via tumbling window. Explodes nested readings array into tabular rows (deviceId, timestamp, sensorType, value, unit, region) for operational analytics. Dependency for RefreshDashboardCache pipeline.",
+    "activities": [
+      {
+        "name": "LookupKustoTable",
+        "description": "Validates that the DeviceTelemetry table in ADX is accessible before starting the copy.",
+        "type": "Lookup",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.00:10:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "source": {
+            "type": "AzureDataExplorerSource",
+            "query": ".show table DeviceTelemetry | limit 1",
+            "noTruncation": false,
+            "queryTimeout": "00:05:00"
+          },
+          "dataset": {
+            "referenceName": "AzureDataExplorerValidationDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "kustoClusterUri": {
+                "value": "@pipeline().parameters.kustoClusterUri",
+                "type": "Expression"
+              },
+              "kustoDatabase": {
+                "value": "@pipeline().parameters.kustoDatabase",
+                "type": "Expression"
+              }
+            }
+          },
+          "firstRowOnly": true
+        }
+      },
+      {
+        "name": "CopyCosmosDbToAdx",
+        "description": "Copies IoT telemetry from Cosmos DB change feed to ADX, exploding the nested readings array. Skips and logs malformed records. Source uses tumbling window time bounds to select changed documents.",
+        "type": "Copy",
+        "dependsOn": [
+          {
+            "activity": "LookupKustoTable",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.18:00:00",
+          "retry": 5,
+          "retryIntervalInSeconds": 60,
+          "secureOutput": false,
+          "secureInput": true
+        },
+        "typeProperties": {
+          "source": {
+            "type": "CosmosDbSqlApiSource",
+            "query": {
+              "value": "SELECT c.deviceId, r.timestamp, r.sensorType, r.value, r.unit, c.region FROM c JOIN r IN c.readings WHERE c._ts >= DateTimeToTimestamp('@{formatDateTime(trigger().outputs.windowStartTime, 'yyyy-MM-ddTHH:mm:ssZ')}') / 1000 AND c._ts < DateTimeToTimestamp('@{formatDateTime(trigger().outputs.windowEndTime, 'yyyy-MM-ddTHH:mm:ssZ')}') / 1000",
+              "type": "Expression"
+            },
+            "pageSize": 1000,
+            "preferredRegions": ["eastus2"],
+            "detectDatetime": false
+          },
+          "sink": {
+            "type": "AzureDataExplorerSink",
+            "ingestionMappingName": "DeviceTelemetryMapping",
+            "ingestionMappingKind": "Json",
+            "flushImmediately": true
+          },
+          "enableStaging": false,
+          "translator": {
+            "type": "TabularTranslator",
+            "mappings": [
+              {
+                "source": { "path": "$['deviceId']" },
+                "sink": { "name": "deviceId", "type": "String" }
+              },
+              {
+                "source": { "path": "$['timestamp']" },
+                "sink": { "name": "timestamp", "type": "DateTime" }
+              },
+              {
+                "source": { "path": "$['sensorType']" },
+                "sink": { "name": "sensorType", "type": "String" }
+              },
+              {
+                "source": { "path": "$['value']" },
+                "sink": { "name": "value", "type": "Double" }
+              },
+              {
+                "source": { "path": "$['unit']" },
+                "sink": { "name": "unit", "type": "String" }
+              },
+              {
+                "source": { "path": "$['region']" },
+                "sink": { "name": "region", "type": "String" }
+              }
+            ]
+          },
+          "enableSkipIncompatibleRow": true,
+          "logSettings": {
+            "enableCopyActivityLog": true,
+            "copyActivityLogSettings": {
+              "logLevel": "Warning",
+              "enableReliableLogging": false
+            },
+            "logLocationSettings": {
+              "linkedServiceName": {
+                "referenceName": "DeadLetterStorageLinkedService",
+                "type": "LinkedServiceReference"
+              },
+              "path": {
+                "value": "@concat(pipeline().parameters.deadLetterContainer, '/cosmosdb-failures/incompatible-rows/', formatDateTime(trigger().outputs.windowStartTime, 'yyyy/MM/dd/HH'))",
+                "type": "Expression"
+              }
+            }
+          }
+        },
+        "inputs": [
+          {
+            "referenceName": "CosmosDbChangeFeedDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "cosmosDbAccountName": {
+                "value": "@pipeline().parameters.cosmosDbAccountName",
+                "type": "Expression"
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "referenceName": "AzureDataExplorerSinkDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "kustoClusterUri": {
+                "value": "@pipeline().parameters.kustoClusterUri",
+                "type": "Expression"
+              },
+              "kustoDatabase": {
+                "value": "@pipeline().parameters.kustoDatabase",
+                "type": "Expression"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "WriteDeadLetterOnFailure",
+        "description": "On CopyCosmosDbToAdx failure, writes the tumbling window bounds and pipeline run ID to the dead-letter blob container so the window can be manually resumed.",
+        "type": "WebActivity",
+        "dependsOn": [
+          {
+            "activity": "CopyCosmosDbToAdx",
+            "dependencyConditions": ["Failed"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:05:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "url": {
+            "value": "@concat('https://', pipeline().parameters.deadLetterStorageAccountName, '.blob.core.windows.net/', pipeline().parameters.deadLetterContainer, '/cosmosdb-failures/failed-windows/', formatDateTime(trigger().outputs.windowStartTime, 'yyyyMMddHHmmss'), '-failure.json')",
+            "type": "Expression"
+          },
+          "method": "PUT",
+          "headers": {
+            "x-ms-blob-type": "BlockBlob",
+            "Content-Type": "application/json"
+          },
+          "body": {
+            "value": "@json(concat('{\"pipelineRunId\":\"', pipeline().RunId, '\",\"windowStart\":\"', trigger().outputs.windowStartTime, '\",\"windowEnd\":\"', trigger().outputs.windowEndTime, '\",\"cosmosDbAccountName\":\"', pipeline().parameters.cosmosDbAccountName, '\",\"cosmosDbDatabase\":\"iot-telemetry-db\",\"cosmosDbContainer\":\"device-events\",\"failureTimestamp\":\"', utcnow(), '\",\"resumeInstructions\":\"Re-trigger pipeline with the same window bounds after investigating the root cause.\"}'))",
+            "type": "Expression"
+          },
+          "authentication": {
+            "type": "MSI",
+            "resource": "https://storage.azure.com/"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "cosmosDbAccountName": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "kustoClusterUri": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "kustoDatabase": {
+        "type": "String",
+        "defaultValue": "OperationalAnalytics"
+      },
+      "deadLetterContainer": {
+        "type": "String",
+        "defaultValue": "adls-deadletter"
+      },
+      "deadLetterStorageAccountName": {
+        "type": "String",
+        "defaultValue": ""
+      }
+    },
+    "annotations": ["auto-generated", "copy-pipeline", "domain:iot"],
+    "folder": {
+      "name": "IoT/Ingestion"
+    }
+  },
+  "_tumbling_window_trigger_reference": {
+    "description": "Deploy a separate TumblingWindowTrigger resource targeting this pipeline with the following settings",
+    "name": "TriggerIncrementalCosmosDbToAdxIot",
+    "type": "TumblingWindowTrigger",
+    "typeProperties": {
+      "frequency": "Minute",
+      "interval": 15,
+      "startTime": "2026-02-01T00:00:00Z",
+      "delay": "00:00:00",
+      "maxConcurrency": 2,
+      "retryPolicy": {
+        "count": 5,
+        "intervalInSeconds": 300
+      }
+    },
+    "pipeline": {
+      "pipelineReference": {
+        "referenceName": "incremental_cosmosdb_to_adx_iot",
+        "type": "PipelineReference"
+      }
+    }
+  }
+}
