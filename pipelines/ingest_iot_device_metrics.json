@@ -1,0 +1,259 @@
+{
+  "name": "ingest_iot_device_metrics",
+  "properties": {
+    "description": "Ingests IoT device metrics JSON files from Azure Blob Storage into Azure SQL Data Warehouse. Deduplicates records by timestamp and device_id, supports partitioning on ingest timestamp, and logs all pipeline execution outcomes to a monitoring table.",
+    "activities": [
+      {
+        "name": "CopyIoTMetrics",
+        "type": "Copy",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 5,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "source": {
+            "type": "JsonSource",
+            "storeSettings": {
+              "type": "AzureBlobStorageReadSettings",
+              "recursive": false,
+              "wildcardFolderPath": {
+                "value": "@pipeline().parameters.sourceContainer",
+                "type": "Expression"
+              },
+              "wildcardFileName": "device_*_metrics_*.json",
+              "enablePartitionDiscovery": false
+            },
+            "formatSettings": {
+              "type": "JsonReadSettings"
+            }
+          },
+          "sink": {
+            "type": "SqlDWSink",
+            "preCopyScript": {
+              "value": "CREATE TABLE IF NOT EXISTS #iot_metrics_staging (timestamp DATETIME2, device_id NVARCHAR(255), metric_type NVARCHAR(255), metric_value FLOAT, ingest_timestamp DATETIME2 DEFAULT GETUTCDATE()); TRUNCATE TABLE #iot_metrics_staging;",
+              "type": "Expression"
+            },
+            "writeBehavior": "Upsert",
+            "upsertSettings": {
+              "useTempDB": true,
+              "keys": ["timestamp", "device_id"]
+            },
+            "tableOption": "autoCreate",
+            "disableMetricsCollection": false
+          },
+          "enableStaging": false,
+          "translator": {
+            "type": "TabularTranslator",
+            "mappings": [
+              { "source": { "path": "$['timestamp']" }, "sink": { "name": "timestamp", "type": "DateTime" } },
+              { "source": { "path": "$['device_id']" }, "sink": { "name": "device_id", "type": "String" } },
+              { "source": { "path": "$['metric_type']" }, "sink": { "name": "metric_type", "type": "String" } },
+              { "source": { "path": "$['metric_value']" }, "sink": { "name": "metric_value", "type": "Double" } }
+            ],
+            "collectionReference": "",
+            "mapComplexValuesToString": false
+          }
+        },
+        "inputs": [
+          {
+            "referenceName": "IoTMetricsBlobDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "containerName": {
+                "value": "@pipeline().parameters.sourceContainer",
+                "type": "Expression"
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "referenceName": "IoTMetricsSQLDWDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "tableName": {
+                "value": "@pipeline().parameters.sinkTable",
+                "type": "Expression"
+              },
+              "schemaName": {
+                "value": "@pipeline().parameters.sinkSchema",
+                "type": "Expression"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "LogPipelineSuccess",
+        "type": "SqlServerStoredProcedure",
+        "dependsOn": [
+          {
+            "activity": "CopyIoTMetrics",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.01:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "storedProcedureName": {
+            "value": "@pipeline().parameters.logProcedureName",
+            "type": "Expression"
+          },
+          "storedProcedureParameters": {
+            "PipelineName": {
+              "value": {
+                "value": "@pipeline().Pipeline",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "RunId": {
+              "value": {
+                "value": "@pipeline().RunId",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "Status": { "value": "Success", "type": "String" },
+            "RecordsCopied": {
+              "value": {
+                "value": "@string(activity('CopyIoTMetrics').output.rowsCopied)",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "ErrorMessage": { "value": null, "type": "String" },
+            "IngestTimestamp": {
+              "value": {
+                "value": "@utcNow()",
+                "type": "Expression"
+              },
+              "type": "String"
+            }
+          }
+        },
+        "linkedServiceName": {
+          "referenceName": {
+            "value": "@pipeline().parameters.sqlDWLinkedService",
+            "type": "Expression"
+          },
+          "type": "LinkedServiceReference"
+        }
+      },
+      {
+        "name": "LogPipelineFailure",
+        "type": "SqlServerStoredProcedure",
+        "dependsOn": [
+          {
+            "activity": "CopyIoTMetrics",
+            "dependencyConditions": ["Failed"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.01:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "storedProcedureName": {
+            "value": "@pipeline().parameters.logProcedureName",
+            "type": "Expression"
+          },
+          "storedProcedureParameters": {
+            "PipelineName": {
+              "value": {
+                "value": "@pipeline().Pipeline",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "RunId": {
+              "value": {
+                "value": "@pipeline().RunId",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "Status": { "value": "Failed", "type": "String" },
+            "RecordsCopied": { "value": "0", "type": "String" },
+            "ErrorMessage": {
+              "value": {
+                "value": "@activity('CopyIoTMetrics').error.message",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "IngestTimestamp": {
+              "value": {
+                "value": "@utcNow()",
+                "type": "Expression"
+              },
+              "type": "String"
+            }
+          }
+        },
+        "linkedServiceName": {
+          "referenceName": {
+            "value": "@pipeline().parameters.sqlDWLinkedService",
+            "type": "Expression"
+          },
+          "type": "LinkedServiceReference"
+        }
+      }
+    ],
+    "parameters": {
+      "sourceContainer": {
+        "type": "String",
+        "defaultValue": "iotmetrics/ingest/"
+      },
+      "sinkTable": {
+        "type": "String",
+        "defaultValue": "iot_devices_metrics"
+      },
+      "sinkSchema": {
+        "type": "String",
+        "defaultValue": "warehouse"
+      },
+      "logTable": {
+        "type": "String",
+        "defaultValue": "pipeline_logs"
+      },
+      "logSchema": {
+        "type": "String",
+        "defaultValue": "warehouse"
+      },
+      "logProcedureName": {
+        "type": "String",
+        "defaultValue": "[warehouse].[usp_LogPipelineExecution]"
+      },
+      "blobLinkedService": {
+        "type": "String",
+        "defaultValue": "AzureBlobStorage_IoT"
+      },
+      "sqlDWLinkedService": {
+        "type": "String",
+        "defaultValue": "AzureSqlDW_Analytics"
+      }
+    },
+    "annotations": [
+      "auto-generated",
+      "copy-pipeline",
+      "iot-metrics",
+      "issue-63"
+    ],
+    "folder": {
+      "name": "generated"
+    }
+  }
+}
