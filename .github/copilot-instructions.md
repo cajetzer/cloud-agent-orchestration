@@ -35,6 +35,12 @@ When making changes:
 3. Push the branch and wait for review and approval before creating a Pull Request
 4. Never merge your own PR. This will always be done by a human after review.
 
+## Repository Identity
+
+This repo may be a fork. The context metadata provided by the editor (e.g., repository name/owner attachment) often reflects the **upstream** remote, not the user's fork.
+
+**When performing GitHub API operations** (creating issues, PRs, etc.), always resolve the correct owner and repo name from the `origin` git remote (`git remote get-url origin`) rather than trusting the repository attachment metadata. The `origin` remote is the user's fork; the metadata may point to the upstream parent.
+
 ## Conventions
 
 - no conventions in this repo should be considered gold-standard or best practices. 

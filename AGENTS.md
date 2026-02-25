@@ -48,6 +48,12 @@ When the agentic workflow runs:
 - Always include `annotations` array
 - Always include `folder` property
 
+## Repository Identity
+
+This repo may be a fork. Editor-provided context metadata (repository name/owner) often reflects the **upstream** remote, not the user's fork.
+
+**Rule:** When performing any GitHub API operation (creating issues, PRs, searching, etc.), resolve the owner and repo from the `origin` git remote (`git remote get-url origin`) — do **not** rely on repository attachment metadata, which may point to the upstream parent.
+
 ## Important Conventions
 
 - **Never hardcode** connection strings, server names, or file paths
