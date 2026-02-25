@@ -339,7 +339,7 @@ flowchart TD
 6. **Create the `adf-pipeline` label** in your repository
 
 7. **Test it**: Create an issue describing a pipeline, add the `adf-pipeline` label
-> 📌 **Hint:** Ask Copilot to create an issue using `/examples/sample-issue.md` as a template.
+> 📌 **Hint:** use the `examples\sample-issue.md` or ask Copilot to create the issue with the `/create-test-issue` saved prompt.
 
 
 ### Running Manually
