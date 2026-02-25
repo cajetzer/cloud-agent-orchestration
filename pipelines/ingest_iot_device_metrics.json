@@ -1,0 +1,312 @@
+{
+  "name": "ingest_iot_device_metrics",
+  "properties": {
+    "description": "Ingests IoT device metrics from Azure Blob Storage JSON files into Azure SQL Data Warehouse. Deduplicates records by timestamp and device_id, and logs execution outcomes to the monitoring table.",
+    "activities": [
+      {
+        "name": "CopyIoTMetrics",
+        "description": "Copy JSON metrics files from Blob Storage to SQL DW staging table, then merge/deduplicate into the target table via pre-copy stored procedure.",
+        "type": "Copy",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.01:00:00",
+          "retry": 5,
+          "retryIntervalInSeconds": 60,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "source": {
+            "type": "JsonSource",
+            "storeSettings": {
+              "type": "AzureBlobStorageReadSettings",
+              "recursive": false,
+              "wildcardFolderPath": {
+                "value": "@pipeline().parameters.sourceFolderPath",
+                "type": "Expression"
+              },
+              "wildcardFileName": {
+                "value": "@pipeline().parameters.sourceFilePattern",
+                "type": "Expression"
+              },
+              "enablePartitionDiscovery": false
+            },
+            "formatSettings": {
+              "type": "JsonReadSettings"
+            }
+          },
+          "sink": {
+            "type": "SqlDWSink",
+            "preCopyScript": {
+              "value": "@concat('DELETE FROM ', pipeline().parameters.sinkStagingTable, ' WHERE 1=1')",
+              "type": "Expression"
+            },
+            "writeBehavior": "Insert",
+            "sqlWriterUseTableLock": false,
+            "tableOption": "autoCreate"
+          },
+          "enableStaging": false,
+          "translator": {
+            "type": "TabularTranslator",
+            "mappings": [
+              { "source": { "path": "$['timestamp']" }, "sink": { "name": "timestamp", "type": "DateTime" } },
+              { "source": { "path": "$['device_id']" }, "sink": { "name": "device_id", "type": "String" } },
+              { "source": { "path": "$['metric_type']" }, "sink": { "name": "metric_type", "type": "String" } },
+              { "source": { "path": "$['metric_value']" }, "sink": { "name": "metric_value", "type": "Double" } }
+            ]
+          }
+        },
+        "inputs": [
+          {
+            "referenceName": "DS_BlobStorageJson_IoTMetrics",
+            "type": "DatasetReference",
+            "parameters": {
+              "containerName": {
+                "value": "@pipeline().parameters.sourceContainer",
+                "type": "Expression"
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "referenceName": "DS_SqlDW_IoTMetricsStaging",
+            "type": "DatasetReference",
+            "parameters": {
+              "tableName": {
+                "value": "@pipeline().parameters.sinkStagingTable",
+                "type": "Expression"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "DeduplicateAndLoadMetrics",
+        "description": "Merge deduplicated records from staging into the target table partitioned by ingest timestamp, using device_id and timestamp as unique keys.",
+        "type": "SqlServerStoredProcedure",
+        "dependsOn": [
+          {
+            "activity": "CopyIoTMetrics",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.01:00:00",
+          "retry": 3,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "storedProcedureName": {
+            "value": "@pipeline().parameters.deduplicateProcedureName",
+            "type": "Expression"
+          },
+          "storedProcedureParameters": {
+            "StagingTable": {
+              "value": {
+                "value": "@pipeline().parameters.sinkStagingTable",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "TargetTable": {
+              "value": {
+                "value": "@pipeline().parameters.sinkTable",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "IngestTimestamp": {
+              "value": {
+                "value": "@utcNow()",
+                "type": "Expression"
+              },
+              "type": "String"
+            }
+          }
+        },
+        "linkedServiceName": {
+          "referenceName": "LS_AzureSqlDW",
+          "type": "LinkedServiceReference"
+        }
+      },
+      {
+        "name": "LogSuccess",
+        "description": "Record successful pipeline execution in monitoring table.",
+        "type": "SqlServerStoredProcedure",
+        "dependsOn": [
+          {
+            "activity": "DeduplicateAndLoadMetrics",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:10:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 15,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "storedProcedureName": {
+            "value": "@pipeline().parameters.logProcedureName",
+            "type": "Expression"
+          },
+          "storedProcedureParameters": {
+            "PipelineName": {
+              "value": {
+                "value": "@pipeline().Pipeline",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "RunId": {
+              "value": {
+                "value": "@pipeline().RunId",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "Status": {
+              "value": "Success",
+              "type": "String"
+            },
+            "ErrorMessage": {
+              "value": "",
+              "type": "String"
+            },
+            "RowsCopied": {
+              "value": {
+                "value": "@string(activity('CopyIoTMetrics').output.rowsCopied)",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "ExecutionTimestamp": {
+              "value": {
+                "value": "@utcNow()",
+                "type": "Expression"
+              },
+              "type": "String"
+            }
+          }
+        },
+        "linkedServiceName": {
+          "referenceName": "LS_AzureSqlDW",
+          "type": "LinkedServiceReference"
+        }
+      },
+      {
+        "name": "LogFailure",
+        "description": "Record failed pipeline execution in monitoring table.",
+        "type": "SqlServerStoredProcedure",
+        "dependsOn": [
+          {
+            "activity": "CopyIoTMetrics",
+            "dependencyConditions": ["Failed"]
+          },
+          {
+            "activity": "DeduplicateAndLoadMetrics",
+            "dependencyConditions": ["Failed"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:10:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 15,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "storedProcedureName": {
+            "value": "@pipeline().parameters.logProcedureName",
+            "type": "Expression"
+          },
+          "storedProcedureParameters": {
+            "PipelineName": {
+              "value": {
+                "value": "@pipeline().Pipeline",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "RunId": {
+              "value": {
+                "value": "@pipeline().RunId",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "Status": {
+              "value": "Failed",
+              "type": "String"
+            },
+            "ErrorMessage": {
+              "value": {
+                "value": "@{activity('CopyIoTMetrics').error?.message}",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "RowsCopied": {
+              "value": "0",
+              "type": "String"
+            },
+            "ExecutionTimestamp": {
+              "value": {
+                "value": "@utcNow()",
+                "type": "Expression"
+              },
+              "type": "String"
+            }
+          }
+        },
+        "linkedServiceName": {
+          "referenceName": "LS_AzureSqlDW",
+          "type": "LinkedServiceReference"
+        }
+      }
+    ],
+    "parameters": {
+      "sourceContainer": {
+        "type": "String",
+        "defaultValue": "iotmetrics"
+      },
+      "sourceFolderPath": {
+        "type": "String",
+        "defaultValue": "ingest"
+      },
+      "sourceFilePattern": {
+        "type": "String",
+        "defaultValue": "device_*_metrics_*.json"
+      },
+      "sinkTable": {
+        "type": "String",
+        "defaultValue": "warehouse.iot_devices_metrics"
+      },
+      "sinkStagingTable": {
+        "type": "String",
+        "defaultValue": "warehouse.iot_devices_metrics_staging"
+      },
+      "deduplicateProcedureName": {
+        "type": "String",
+        "defaultValue": "warehouse.usp_MergeIoTMetrics"
+      },
+      "logProcedureName": {
+        "type": "String",
+        "defaultValue": "warehouse.usp_LogPipelineExecution"
+      }
+    },
+    "annotations": [
+      "auto-generated",
+      "copy-pipeline",
+      "iot-metrics",
+      "issue-57"
+    ],
+    "folder": {
+      "name": "generated"
+    }
+  }
+}
