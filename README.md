@@ -1,135 +1,138 @@
-# GitHub Agentic Workflows — Multi-Agent ADF Pipeline Orchestration
+# GitHub Agentic Workflows — Multi-Agent Orchestration Test Implementation
 
-A **learning and demo repository** showing how to use **GitHub Agentic Workflows** (technical preview) for multi-agent orchestration of Azure Data Factory pipeline generation and review.
+A **learning and demo repository** showing how to use **GitHub Agentic Workflows** (technical preview) for cloud-based multi-agent orchestration of custom agents defined in agent.md files.
 
-This demonstrates:
-- **Custom Agents** (`.github/agents/`) - Reusable, manually-assignable agents
-- **Agentic Workflows** (`.github/workflows/*.md`) - Automated orchestration that invokes those agents
+This includes:
+- **Custom Agents** (`.github/agents/`) - Reusable, for both manual-assignment through Coding Agent and our Agentic Workflow test implementation
+- **Agentic Workflows** (`.github/workflows/*.md`) - Automated orchestration that invokes those agents through sandboxed GitHub Copilot CLI, built purely by describing the desired behavior in natural language (markdown) 
 - **Orchestrator/Worker Pattern** - Coordinator dispatches specialized workers
 
 > ⚠️ **Technical Preview**: GitHub Agentic Workflows launched February 13, 2026. This is cutting-edge functionality that may change.
+>
+> - [Blog: GitHub Agentic Workflows are now in technical preview](https://github.blog/changelog/2026-02-13-github-agentic-workflows-are-now-in-technical-preview/)
+> - [Open Source gh-aw repository](https://github.com/github/gh-aw)
+> - [Automate repository tasks with GitHub Agentic Workflows](https://github.blog/ai-and-ml/automate-repository-tasks-with-github-agentic-workflows/)
 
-## What This Repository Demonstrates
+### What This Repository Includes
 
 | Concept | Files | Purpose |
 |---------|-------|---------|
-| **Custom Agents** | `.github/agents/adf-generate.agent.md` | Manually assignable pipeline generator |
-| | `.github/agents/adf-review.agent.md` | Manually assignable pipeline reviewer |
-| **Orchestrator Workflow** | `.github/workflows/adf-orchestrator.md` | Automated coordination |
-| **Worker Workflows** | `.github/workflows/adf-generate-worker.md` | Invokes generate agent with tools |
+| **Custom Agents** | `.github/agents/adf-generate.agent.md` | Specialized in generating ADF pipelines |
+| | `.github/agents/adf-review.agent.md` | Specialized in reviewing ADF pipeline definitions for functionality, best practices, and common issues |
+|  **Orchestrator Workflow Definition** | `.github/workflows/adf-orchestrator.md` | Automated agent coordination |
+| **Worker Workflow Definitions** | `.github/workflows/adf-generate-worker.md` | Invokes generate agent with tools |
 | | `.github/workflows/adf-review-worker.md` | Invokes review agent with KB access |
 
-### Two Ways to Use the Agents
+> **Note**: also included is a `.github/agents/agentic-workflows.agent.md` installed via the `gh-aw` extension with `gh aw init`. This agent helps to create, debug, and upgrade AI-powered workflows with intelligent prompt routing, and was heavily used to generate and iterate on this example.
+
+### Two Ways to Use the Agents in this Project
 
 | Method | How | When |
 |--------|-----|------|
 | **Manual** | Assign Copilot to issue → Select agent from dropdown | Ad-hoc work, testing |
-| **Automated** | Label issue → Orchestrator dispatches workers | Production automation |
+| **Automated** | Label issue → Orchestrator dispatches workers | Automated agentic dev/review workflow |
+
 
 ---
 
-## Architecture: Multi-Agent Orchestration
+## 📚 Foundational Concepts
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         GitHub Issue                            │
-│  "Create a pipeline to copy data from Blob to SQL Database"     │
-│  Label: adf-pipeline                                            │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              │  Issue labeled triggers orchestrator
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     ADF ORCHESTRATOR                            │
-│                  adf-orchestrator.md                            │
-│                                                                 │
-│  1. Validate issue has requirements                             │
-│  2. Dispatch generation worker → Creates PR                     │
-│  3. Dispatch review worker → Reviews PR                         │
-│  4. Handle review results:                                      │
-│     • approved → Done                                           │
-│     • errors → Re-dispatch generation with feedback (up to 3x)  │
-│     • 3 failures → Escalate to human                            │
-└─────────────────────────────────────────────────────────────────┘
-          │                                       │
-          │ dispatch-workflow                     │ dispatch-workflow
-          ▼                                       ▼
-┌─────────────────────────┐         ┌─────────────────────────────┐
-│   GENERATION WORKER     │         │      REVIEW WORKER          │
-│ adf-generate-worker.md  │         │  adf-review-worker.md       │
-│                         │         │                             │
-│ Modes:                  │         │ Invokes:                    │
-│ • Initial: Create PR    │         │  adf-review.agent.md        │
-│ • Fix: Update PR        │         │                             │
-│                         │         │ Tools: github, bash         │
-│ Tools: github, edit,    │         │ + Knowledge Base JSON       │
-│        bash [jq]        │         │                             │
-└─────────────────────────┘         └─────────────────────────────┘
-          │                                       │
-          │                                       │
-          └──────────────┬────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        Pull Request                             │
-│  • Pipeline JSON generated/updated by worker                    │
-│  • Review findings with knowledge base references               │
-│  • Labels: approved / changes-requested / approved-with-warnings│
-└─────────────────────────────────────────────────────────────────┘
-                         │
-      ┌──────────────────┼──────────────────┐
-      │                  │                  │
-      ▼                  ▼                  ▼
-  [approved]      [warnings only]    [errors found]
-      │                  │                  │
-      ▼                  ▼                  ▼
-    Done            Done (with       Re-dispatch
-                    suggestions)     generation
-                                          │
-                                    ┌─────┴─────┐
-                                    │  < 3x?    │
-                                    └─────┬─────┘
-                                    yes   │   no
-                                    ↓     │    ↓
-                               Fix cycle  │  Escalate
-                               (loop) ◄───┘
-```
+### What is Copilot Coding Agent?
 
+**Copilot Coding Agent** is an AI-powered software engineering agent that can autonomously work on GitHub issues and pull requests. Unlike Copilot Chat (which responds to questions) or Copilot code completion (which suggests code as you type), the Coding Agent:
+
+- **Works autonomously** — You assign it an issue, and it works independently
+- **Creates branches and PRs** — It commits code and opens pull requests
+- **Reads and writes files** — It can explore your codebase and make changes
+- **Follows instructions** — It reads issue descriptions and custom agent definitions
+
+> 📖 **Learn more:** [GitHub Copilot coding agent](https://docs.github.com/en/copilot/using-github-copilot/using-copilot-coding-agent)
+
+### What are Custom Agents?
+
+**Custom Agents** are markdown files that give Copilot specialized instructions for specific tasks. They live in `.github/agents/` and define:
+
+- **When to activate** — What types of issues/PRs the agent handles
+- **What to do** — Step-by-step instructions for the agent
+- **What tools to use** — Templates, rules, and reference files
+- **How to hand off** — When to pass work to another agent or human (not yet supported in cloud agents at publish time)
+
+```markdown
+# Example: .github/agents/my-agent.agent.md
 ---
-
-## Custom Agents (Manually Assignable)
-
-The agents in `.github/agents/` can be used **manually** by assigning Copilot to an issue/PR:
-
-### `adf-generate.agent.md`
-```yaml
----
-name: ADF Pipeline Generator
-description: Generates Azure Data Factory pipeline JSON definitions
+name: My Custom Agent
+description: Does a specific task
 tools: ["read", "edit", "search"]
 ---
+
+## Instructions
+1. Read the issue description
+2. Do the task
+3. Create a PR with results
 ```
 
-### `adf-review.agent.md`
+> 📖 **Learn more:** [Customizing Copilot coding agent](https://docs.github.com/en/copilot/customizing-copilot/customizing-the-behavior-of-copilot-coding-agent)
+
+### How Does Agent Assignment Work Today?
+
+At the time of this publish, agents defined in `.github/agents/` can be assigned to issues manually through the GitHub UI. This will invoke Coding Agent to use the custom agent selected. Track the work in the Agents panel. 
+
+**Assign Copilot to an issue:**
+   1. Click **Assign to Copilot**
+   1. Select a custom agent and desired model
+   1. Add any additional instructions
+   1. Click **Assign**
+
+
+Custom agents for the cloud Coding Agent alone cannot yet automatically:
+- Detect when they should start working
+- Hand off work to other agents cloud agents
+- Track state across multiple interactions
+- Enforce retry limits or escalation policies
+
+>**Note: Many of these are available in local IDE agents, but not yet in the cloud agent.**
+
+In the meantime, we are testing the use of **GitHub Agentic Workflows** to achieve multi-agent orchestration in the cloud, using the safe outputs and workflow dispatch capabilities to coordinate work across multiple specialized agents.
+
+### What are GitHub Agentic Workflows?
+
+**GitHub Agentic Workflows** are AI-powered repository automation that runs inside GitHub Actions. Instead of writing complex YAML with fixed if/then logic, you describe what you want in **markdown** and an AI coding agent figures out how to do it.
+
+Each workflow is a `.md` file in `.github/workflows/` with two parts:
+- **Frontmatter (YAML)** — Configures triggers, permissions, tools, and safe outputs
+- **Markdown body** — Natural language instructions the agent follows
+
+The `gh aw compile` CLI converts these into standard GitHub Actions `.lock.yml` files with security hardening. At runtime, a coding agent (Copilot CLI, Claude, or Codex) executes your instructions in a sandboxed container.
+
+**Key design principles:**
+- **Read-only by default** — Agents have no write access unless granted through safe outputs
+- **Safe outputs** — Pre-approved write operations (create PRs, add comments, add labels, dispatch workflows) that are sanitized before execution
+- **Sandboxed execution** — Network isolation, tool allowlisting, and containerized environments
+- **Workflow dispatch** — Workflows can trigger other workflows, enabling multi-agent orchestration
+
 ```yaml
+# Minimal example: triage new issues
 ---
-name: ADF Pipeline Review Agent
-description: Reviews ADF pipelines for best practices and common issues
-tools: ["read", "search"]
+on:
+  issues:
+    types: [opened]
+permissions: read-all
+safe-outputs:
+  add-comment:
+  add-labels:
 ---
+
+Analyze the new issue and add appropriate labels. If the issue is unclear,
+post a comment asking for more details.
 ```
 
-**Manual usage:**
-1. Open an issue describing pipeline requirements
-2. Click **Assignees** → Add **Copilot**
-3. Select **ADF Pipeline Generator** from the dropdown
-4. Copilot works using the agent's instructions
+> 📖 **Learn more:** [GitHub Agentic Workflows documentation](https://github.github.com/gh-aw/) · [Announcement blog post](https://github.blog/ai-and-ml/automate-repository-tasks-with-github-agentic-workflows/) · [Open source repo](https://github.com/github/gh-aw)
 
 ---
 
-## Agentic Workflows (Automated Orchestration)
+## 🛠️ Test Implementation: Agentic Workflows for Multi-Agent Orchestration
 
-The workflows in `.github/workflows/` provide **automated** orchestration:
+The workflows in `.github/workflows/` attempt to provide **automated** agent orchestration:
 
 ### 1. Orchestrator (`adf-orchestrator.md`)
 
@@ -140,6 +143,13 @@ safe-outputs:
   dispatch-workflow:
     workflows: [adf-generate-worker, adf-review-worker]
     max: 5
+  add-comment:
+    max: 3
+  add-labels:
+    max: 3
+
+tools:
+  github:
 ```
 
 **Responsibilities**:
@@ -157,12 +167,24 @@ safe-outputs:
 # Inputs determine mode:
 inputs:
   issue_number: required    # Always provided
+  issue_title: required     # Issue title
+  issue_body: required      # Issue body with requirements
   pr_number: optional       # If provided → FIX mode
   review_feedback: optional # Errors to address
+
+engine:
+  id: copilot
+  agent: adf-generate  # References .github/agents/adf-generate.agent.md
+
+tools:
+  github:
+  edit:
+  bash: ["jq", "mkdir"]
 
 safe-outputs:
   create-pull-request: ...        # Used in INITIAL mode
   push-to-pull-request-branch: ...  # Used in FIX mode (updates existing PR)
+  add-comment: ...                # Status updates on issue/PR
 ```
 
 **Two Modes**:
@@ -183,34 +205,31 @@ engine:
 tools:
   github:
   bash: ["jq", "cat"]  # For reading knowledge base JSON
+
+safe-outputs:
+  add-comment:                       # Post review findings
+  add-labels:                        # approved / changes-requested / approved-with-warnings
+  create-pull-request-review-comment: # Inline review comments on PR
 ```
 
 The review agent reads `rules/common_issues.json` directly for domain knowledge. In production, this could be replaced with an MCP server, external API, or vector database.
 
----
-
-## Why Multi-Agent vs Single Agent?
-
-| Aspect | Single Agent | Multi-Agent Orchestration |
-|--------|--------------|---------------------------|
-| **Separation of concerns** | One agent does everything | Specialized agents per task |
-| **Tool access** | All tools to one agent | Right tools to right agent |
-| **Context management** | Long context, may drift | Fresh context per worker |
-| **Failure isolation** | One failure stops all | Workers can retry independently |
-| **Extensibility** | Modify one big agent | Add new workers easily |
-| **Security** | Broad permissions | Scoped permissions per worker |
-
-### The Review Agent's Knowledge Base
+#### The Review Agent's Knowledge Base
 
 The review agent reads `rules/common_issues.json` for domain expertise:
 
 ```json
 {
   "issues": {
-    "KB-010": {
-      "name": "Small File Iteration Anti-Pattern",
+    "KB-001": {
+      "name": "Missing Retry Policy",
       "severity": "warning",
-      "resolution": "Use wildcard file paths with bulk copy"
+      "resolution": "Add a policy block with retry: 3 and retryIntervalInSeconds: 30"
+    },
+    "KB-002": {
+      "name": "Hardcoded Connection String",
+      "severity": "error",
+      "resolution": "Move connection details to linked service and use parameters"
     }
   }
 }
@@ -237,9 +256,46 @@ tools:
       KB_CONNECTION_STRING: ${{ secrets.KB_CONNECTION }}
 ```
 
+### Architecture: Multi-Agent Orchestration
+
+```mermaid
+flowchart TD
+    Issue["🎫 GitHub Issue\nLabel: adf-pipeline"]
+    Orchestrator["🎯 ADF ORCHESTRATOR\nadf-orchestrator.md"]
+    GenWorker["⚙️ GENERATION WORKER\nadf-generate-worker.md"]
+    RevWorker["🔍 REVIEW WORKER\nadf-review-worker.md"]
+    PR["📋 Pull Request"]
+    Approved["✅ Done"]
+    Warnings["✅ Done\n(with suggestions)"]
+    Decision{{"< 3 cycles?"}}
+    Escalate["🚨 Escalate\nto human"]
+
+    Issue -->|"Issue labeled\ntriggers orchestrator"| Orchestrator
+    Orchestrator -->|"dispatch-workflow"| GenWorker
+    Orchestrator -->|"dispatch-workflow"| RevWorker
+    GenWorker --> PR
+    RevWorker --> PR
+    PR -->|"approved"| Approved
+    PR -->|"warnings only"| Warnings
+    PR -->|"errors found"| Decision
+    Decision -->|"Yes"| GenWorker
+    Decision -->|"No"| Escalate
+
+    subgraph gen ["Generation Worker"]
+        direction TB
+        GenWorker
+        GenModes["Modes: Initial (Create PR) · Fix (Update PR)\nTools: github, edit, bash"]
+    end
+
+    subgraph rev ["Review Worker"]
+        direction TB
+        RevWorker
+        RevDetails["Invokes: adf-review.agent.md\nTools: github, bash + Knowledge Base JSON"]
+    end
+```
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
 ### Prerequisites
 
@@ -273,16 +329,6 @@ tools:
       gh aw secrets set COPILOT_GITHUB_TOKEN --value "your-pat-here"
       ```
 
-   **For Claude**: Add your Anthropic API key:
-   ```bash
-   gh aw secrets set ANTHROPIC_API_KEY --value "your-api-key"
-   ```
-
-   **For Codex**: Add your OpenAI API key:
-   ```bash
-   gh aw secrets set OPENAI_API_KEY --value "your-api-key"
-   ```
-
 5. **Commit and push** the workflow files:
    ```bash
    git add .github/workflows/
@@ -293,6 +339,8 @@ tools:
 6. **Create the `adf-pipeline` label** in your repository
 
 7. **Test it**: Create an issue describing a pipeline, add the `adf-pipeline` label
+> 📌 **Hint:** Ask Copilot to create an issue using `/examples/sample-issue.md` as a template.
+
 
 ### Running Manually
 
@@ -312,11 +360,18 @@ gh aw status
 ├── .github/
 │   ├── agents/                            # Custom agents (manually assignable)
 │   │   ├── adf-generate.agent.md          # Pipeline generation agent
-│   │   └── adf-review.agent.md            # Pipeline review agent
+│   │   ├── adf-review.agent.md            # Pipeline review agent
+│   │   └── agentic-workflows.agent.md     # gh-aw workflow helper (dispatcher)
+│   ├── aw/
+│   │   └── actions-lock.json              # Pinned Actions used by compiled workflows
+│   ├── copilot-instructions.md            # Repo-level Copilot instructions
+│   ├── prompts/
+│   │   └── create-test-issue.prompt.md    # Reusable prompt for creating test issues
 │   └── workflows/                         # Agentic workflows (automated)
 │       ├── adf-orchestrator.md            # Orchestrator (coordinates workers)
 │       ├── adf-generate-worker.md         # Invokes generate agent
 │       ├── adf-review-worker.md           # Invokes review agent + KB
+│       ├── copilot-setup-steps.yml        # Environment setup for Coding Agent
 │       └── *.lock.yml                     # Compiled workflows (generated)
 ├── templates/                             # ADF pipeline JSON templates
 │   ├── copy_activity.json
@@ -326,13 +381,15 @@ gh aw status
 │   └── common_issues.json                 # Knowledge base for review agent
 ├── examples/
 │   └── sample-issue.md                    # Example issue to try
+├── .env.example                           # Local dev environment template
 ├── AGENTS.md                              # Repo-wide agent instructions
+├── copilot-setup-steps.md                 # Coding Agent environment setup
 └── README.md
 ```
 
 ---
 
-## Key Concepts
+## Key Concepts used in this Example
 
 ### Frontmatter (YAML)
 ```yaml
@@ -470,41 +527,6 @@ To debug a failure:
 2. Click the workflow run URL
 3. Expand the `agent` job logs
 4. Look for error messages or missing tool calls
-
----
-
-## Why Agentic Workflows vs Other Approaches?
-
-### Compared to Custom Agents + GraphQL Workflows (main branch)
-
-| Aspect | Custom Agents + Workflows | Agentic Workflows |
-|--------|---------------------------|-------------------|
-| Trigger mechanism | GraphQL API (undocumented) | Native Actions trigger |
-| Write permissions | Requires PAT | Safe outputs (no PAT) |
-| Agent orchestration | Manual or unreliable API | `dispatch-workflow` |
-| Security model | You manage it | Built-in sandboxing |
-| Complexity | 5 YAML + 2 agents | 3 markdown files |
-
-### Compared to Single Agent (feature/single-agent-approach)
-
-| Aspect | Single Agent | Multi-Agent Orchestration |
-|--------|--------------|---------------------------|
-| Separation | All in one | Specialized workers |
-| Tool scoping | All tools everywhere | Right tools per worker |
-| Failure handling | Entire agent fails | Individual workers retry |
-| Extensibility | Modify one agent | Add new workers |
-
----
-
-## Comparison: Three Approaches
-
-This repository has three branches demonstrating different approaches:
-
-| Branch | Approach | Agents | Workflows | Automation |
-|--------|----------|--------|-----------|------------|
-| `main` | Custom Agents + GraphQL | 2 agents | 5 YAML | Partial (API issues) |
-| `feature/single-agent-approach` | Single Custom Agent | 1 agent | 0 | Manual trigger |
-| `feature/agentic-workflows` | **Agentic Workflows** | 2 agents | 3 markdown | **Full orchestration** |
 
 ---
 
