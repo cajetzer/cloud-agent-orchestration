@@ -1,0 +1,201 @@
+{
+  "name": "rest_api_to_adls_orders",
+  "properties": {
+    "description": "Incremental ingestion pipeline that extracts order data from a REST API (cursor-based pagination) and writes it to Azure Data Lake Storage Gen2 in Parquet format with snappy compression, partitioned by date (year/month/day). Runs every 6 hours. Uses a watermark table to track last successful run timestamp for incremental loads.",
+    "activities": [
+      {
+        "name": "LookupWatermark",
+        "description": "Retrieve the last successful run timestamp from the watermark table to enable incremental loads.",
+        "type": "Lookup",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.00:10:00",
+          "retry": 3,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "source": {
+            "type": "AzureSqlSource",
+            "sqlReaderQuery": {
+              "value": "SELECT ISNULL(MAX(LastRunTimestamp), '1970-01-01T00:00:00Z') AS LastRunTimestamp FROM @{pipeline().parameters.WatermarkTableName} WHERE PipelineName = 'rest_api_to_adls_orders'",
+              "type": "Expression"
+            },
+            "queryTimeout": "00:02:00"
+          },
+          "dataset": {
+            "referenceName": "WatermarkDataset",
+            "type": "DatasetReference"
+          },
+          "firstRowOnly": true
+        }
+      },
+      {
+        "name": "CopyOrdersFromRestAPI",
+        "description": "Copy order records from the REST API endpoint to ADLS Gen2 as Parquet files partitioned by date. Uses cursor-based pagination via next_cursor field and incremental filtering via modified_since query parameter.",
+        "type": "Copy",
+        "dependsOn": [
+          {
+            "activity": "LookupWatermark",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 5,
+          "retryIntervalInSeconds": 10,
+          "secureOutput": false,
+          "secureInput": true
+        },
+        "typeProperties": {
+          "source": {
+            "type": "RestSource",
+            "httpRequestTimeout": "00:05:00",
+            "requestInterval": "00.00:00:00.010",
+            "requestMethod": "GET",
+            "requestBody": null,
+            "paginationRules": {
+              "AbsoluteUrl": "$.next_cursor"
+            },
+            "additionalHeaders": {
+              "Accept": "application/json"
+            }
+          },
+          "sink": {
+            "type": "ParquetSink",
+            "storeSettings": {
+              "type": "AzureBlobFSWriteSettings"
+            },
+            "formatSettings": {
+              "type": "ParquetWriteSettings",
+              "fileExtension": ".parquet"
+            }
+          },
+          "enableStaging": false,
+          "translator": {
+            "type": "TabularTranslator",
+            "collectionReference": "$['data']"
+          }
+        },
+        "inputs": [
+          {
+            "referenceName": "RestApiOrdersDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "ModifiedSince": {
+                "value": "@activity('LookupWatermark').output.firstRow.LastRunTimestamp",
+                "type": "Expression"
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "referenceName": "AdlsGen2ParquetDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "FolderPath": {
+                "value": "@concat(pipeline().parameters.AdlsOutputBasePath, 'year=', formatDateTime(pipeline().TriggerTime, 'yyyy'), '/month=', formatDateTime(pipeline().TriggerTime, 'MM'), '/day=', formatDateTime(pipeline().TriggerTime, 'dd'), '/')",
+                "type": "Expression"
+              },
+              "CompressionType": "snappy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "UpdateWatermark",
+        "description": "Update the watermark table with the current pipeline trigger time to mark this run as the new high-water mark for the next incremental load.",
+        "type": "SqlServerStoredProcedure",
+        "dependsOn": [
+          {
+            "activity": "CopyOrdersFromRestAPI",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:10:00",
+          "retry": 3,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "storedProcedureName": {
+            "value": "@pipeline().parameters.WatermarkStoredProcName",
+            "type": "Expression"
+          },
+          "storedProcedureParameters": {
+            "LastModifiedtime": {
+              "value": {
+                "value": "@pipeline().TriggerTime",
+                "type": "Expression"
+              },
+              "type": "DateTime"
+            },
+            "PipelineName": {
+              "value": {
+                "value": "@pipeline().Pipeline",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "TableName": {
+              "value": {
+                "value": "@pipeline().parameters.WatermarkTableName",
+                "type": "Expression"
+              },
+              "type": "String"
+            }
+          }
+        },
+        "linkedServiceName": {
+          "referenceName": "WatermarkDbLinkedService",
+          "type": "LinkedServiceReference"
+        }
+      }
+    ],
+    "parameters": {
+      "RestApiBaseUrl": {
+        "type": "String",
+        "defaultValue": "",
+        "description": "Base URL of the REST API endpoint (e.g. https://<host>/v1/orders). Must be set per environment."
+      },
+      "RestApiKeySecretName": {
+        "type": "String",
+        "defaultValue": "",
+        "description": "Name of the Azure Key Vault secret holding the REST API authentication key."
+      },
+      "AdlsOutputBasePath": {
+        "type": "String",
+        "defaultValue": "raw/orders/",
+        "description": "Base output path in ADLS Gen2 container. Date partitioning (year=/month=/day=) is appended automatically."
+      },
+      "AdlsAccountName": {
+        "type": "String",
+        "defaultValue": "",
+        "description": "ADLS Gen2 storage account name. Must be set per environment."
+      },
+      "AdlsContainerName": {
+        "type": "String",
+        "defaultValue": "",
+        "description": "ADLS Gen2 container name. Must be set per environment."
+      },
+      "WatermarkTableName": {
+        "type": "String",
+        "defaultValue": "WatermarkTable",
+        "description": "Name of the watermark table used to track last successful run timestamps."
+      },
+      "WatermarkStoredProcName": {
+        "type": "String",
+        "defaultValue": "usp_UpdateWatermark",
+        "description": "Name of the stored procedure used to update the watermark after a successful run."
+      }
+    },
+    "annotations": ["auto-generated", "copy-pipeline", "rest-api-ingestion", "incremental-load"],
+    "folder": {
+      "name": "generated"
+    }
+  }
+}
