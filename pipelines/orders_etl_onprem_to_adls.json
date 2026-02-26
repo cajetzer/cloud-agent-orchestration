@@ -1,0 +1,626 @@
+{
+  "name": "orders_etl_onprem_to_adls",
+  "properties": {
+    "description": "Event-triggered ETL pipeline that reads a control file from Blob Storage, extracts order data from on-premises SQL Server 2019 via Self-Hosted IR, validates row counts against expectedRowCount from the trigger file (5% tolerance), and routes validated data to the curated zone as Snappy Parquet or to the quarantine zone as CSV with an error manifest. Writes an audit record to Azure SQL Database and deletes the trigger file on completion. Assumptions: (1) AuditSqlDbLinkedService is a parameterized linked service accepting a connectionString parameter. (2) All dataset linked services are pre-created and parameterized. (3) Managed Identity is granted Storage Blob Data Contributor on the ADLS account for the WebActivity error manifest write. (4) Legacy currency_code values outside ISO 4217 do not cause pipeline failure; they are flagged in the error manifest JSON.",
+    "activities": [
+      {
+        "name": "LookupTriggerFile",
+        "type": "Lookup",
+        "description": "Read trigger file JSON to obtain batchId and expectedRowCount.",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.00:10:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "source": {
+            "type": "JsonSource",
+            "storeSettings": {
+              "type": "AzureBlobStorageReadSettings",
+              "recursive": false
+            },
+            "formatSettings": {
+              "type": "JsonReadSettings"
+            }
+          },
+          "dataset": {
+            "referenceName": "TriggerFileDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "triggerFilePath": {
+                "value": "@pipeline().parameters.triggerFilePath",
+                "type": "Expression"
+              }
+            }
+          },
+          "firstRowOnly": true
+        }
+      },
+      {
+        "name": "ExtractFromSQLServer",
+        "type": "Copy",
+        "description": "Extract orders within the trigger window from on-premises SQL Server via Self-Hosted IR to ADLS staging as pipe-delimited CSV.",
+        "dependsOn": [
+          {
+            "activity": "LookupTriggerFile",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:45:00",
+          "retry": 3,
+          "retryIntervalInSeconds": 120,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "source": {
+            "type": "SqlServerSource",
+            "sqlReaderQuery": {
+              "value": "SELECT order_id, customer_id, order_date, ship_date, total_amount, currency_code, line_items, warehouse_code FROM dbo.orders_export WHERE order_date >= '@{pipeline().parameters.windowStart}' AND order_date < '@{pipeline().parameters.windowEnd}' AND is_extracted = 0",
+              "type": "Expression"
+            },
+            "queryTimeout": "00:40:00",
+            "isolationLevel": "ReadCommitted",
+            "partitionOption": "None"
+          },
+          "sink": {
+            "type": "DelimitedTextSink",
+            "storeSettings": {
+              "type": "AzureBlobFSWriteSettings"
+            },
+            "formatSettings": {
+              "type": "DelimitedTextWriteSettings",
+              "quoteAllText": false,
+              "fileExtension": ".csv"
+            }
+          },
+          "enableStaging": false,
+          "translator": {
+            "type": "TabularTranslator",
+            "typeConversion": true,
+            "typeConversionSettings": {
+              "allowDataTruncation": false,
+              "treatBooleanAsNumber": false
+            }
+          }
+        },
+        "inputs": [
+          {
+            "referenceName": "OnPremSQLServerDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "sqlServerHost": {
+                "value": "@pipeline().parameters.sqlServerHost",
+                "type": "Expression"
+              },
+              "sqlDatabaseName": {
+                "value": "@pipeline().parameters.sqlDatabaseName",
+                "type": "Expression"
+              },
+              "selfHostedIRName": {
+                "value": "@pipeline().parameters.selfHostedIRName",
+                "type": "Expression"
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "referenceName": "StagingCsvDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "adlsAccountName": {
+                "value": "@pipeline().parameters.adlsAccountName",
+                "type": "Expression"
+              },
+              "batchId": {
+                "value": "@activity('LookupTriggerFile').output.firstRow.batchId",
+                "type": "Expression"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "UpdateExtractedFlag",
+        "type": "Script",
+        "description": "Mark extracted rows as processed on the source SQL Server to prevent re-extraction.",
+        "dependsOn": [
+          {
+            "activity": "ExtractFromSQLServer",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:15:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 60,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "linkedServiceName": {
+          "referenceName": "OnPremSQLServerLinkedService",
+          "type": "LinkedServiceReference",
+          "parameters": {
+            "sqlServerHost": {
+              "value": "@pipeline().parameters.sqlServerHost",
+              "type": "Expression"
+            },
+            "sqlDatabaseName": {
+              "value": "@pipeline().parameters.sqlDatabaseName",
+              "type": "Expression"
+            },
+            "selfHostedIRName": {
+              "value": "@pipeline().parameters.selfHostedIRName",
+              "type": "Expression"
+            }
+          }
+        },
+        "typeProperties": {
+          "scripts": [
+            {
+              "type": "NonQuery",
+              "text": {
+                "value": "UPDATE dbo.orders_export SET is_extracted = 1 WHERE order_date >= '@{pipeline().parameters.windowStart}' AND order_date < '@{pipeline().parameters.windowEnd}' AND is_extracted = 0",
+                "type": "Expression"
+              }
+            }
+          ],
+          "logSettings": {
+            "logDestination": "ActivityOutput"
+          }
+        }
+      },
+      {
+        "name": "ValidateAndRoute",
+        "type": "IfCondition",
+        "description": "Validate that actual row count is within 5% of expectedRowCount from the trigger file. Routes to curated (Parquet) if valid, quarantine (CSV + error manifest) if not.",
+        "dependsOn": [
+          {
+            "activity": "ExtractFromSQLServer",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "expression": {
+            "value": "@lessOrEquals(abs(sub(activity('ExtractFromSQLServer').output.rowsCopied, int(activity('LookupTriggerFile').output.firstRow.expectedRowCount))), mul(float(int(activity('LookupTriggerFile').output.firstRow.expectedRowCount)), 0.05))",
+            "type": "Expression"
+          },
+          "ifTrueActivities": [
+            {
+              "name": "CopyToParquetCurated",
+              "type": "Copy",
+              "description": "Convert staging CSV to Snappy-compressed Parquet in the curated zone with explicit column mapping preserving nullable ship_date.",
+              "dependsOn": [],
+              "policy": {
+                "timeout": "0.01:00:00",
+                "retry": 2,
+                "retryIntervalInSeconds": 30,
+                "secureOutput": false,
+                "secureInput": false
+              },
+              "typeProperties": {
+                "source": {
+                  "type": "DelimitedTextSource",
+                  "storeSettings": {
+                    "type": "AzureBlobFSReadSettings",
+                    "recursive": false
+                  },
+                  "formatSettings": {
+                    "type": "DelimitedTextReadSettings"
+                  }
+                },
+                "sink": {
+                  "type": "ParquetSink",
+                  "storeSettings": {
+                    "type": "AzureBlobFSWriteSettings"
+                  },
+                  "formatSettings": {
+                    "type": "ParquetWriteSettings",
+                    "compressionType": "snappy"
+                  }
+                },
+                "enableStaging": false,
+                "translator": {
+                  "type": "TabularTranslator",
+                  "mappings": [
+                    {
+                      "source": { "name": "order_id", "type": "Int32" },
+                      "sink": { "name": "order_id", "type": "Int32", "nullable": false }
+                    },
+                    {
+                      "source": { "name": "customer_id", "type": "String" },
+                      "sink": { "name": "customer_id", "type": "String", "nullable": false }
+                    },
+                    {
+                      "source": { "name": "order_date", "type": "DateTime" },
+                      "sink": { "name": "order_date", "type": "DateTime", "nullable": false }
+                    },
+                    {
+                      "source": { "name": "ship_date", "type": "DateTime" },
+                      "sink": { "name": "ship_date", "type": "DateTime", "nullable": true }
+                    },
+                    {
+                      "source": { "name": "total_amount", "type": "Decimal" },
+                      "sink": { "name": "total_amount", "type": "Decimal", "precision": 18, "scale": 2, "nullable": false }
+                    },
+                    {
+                      "source": { "name": "currency_code", "type": "String" },
+                      "sink": { "name": "currency_code", "type": "String", "nullable": false }
+                    },
+                    {
+                      "source": { "name": "line_items", "type": "Int32" },
+                      "sink": { "name": "line_items", "type": "Int32", "nullable": false }
+                    },
+                    {
+                      "source": { "name": "warehouse_code", "type": "String" },
+                      "sink": { "name": "warehouse_code", "type": "String", "nullable": false }
+                    }
+                  ]
+                }
+              },
+              "inputs": [
+                {
+                  "referenceName": "StagingCsvDataset",
+                  "type": "DatasetReference",
+                  "parameters": {
+                    "adlsAccountName": {
+                      "value": "@pipeline().parameters.adlsAccountName",
+                      "type": "Expression"
+                    },
+                    "batchId": {
+                      "value": "@activity('LookupTriggerFile').output.firstRow.batchId",
+                      "type": "Expression"
+                    }
+                  }
+                }
+              ],
+              "outputs": [
+                {
+                  "referenceName": "CuratedParquetDataset",
+                  "type": "DatasetReference",
+                  "parameters": {
+                    "adlsAccountName": {
+                      "value": "@pipeline().parameters.adlsAccountName",
+                      "type": "Expression"
+                    },
+                    "year": {
+                      "value": "@formatDateTime(utcNow(),'yyyy')",
+                      "type": "Expression"
+                    },
+                    "month": {
+                      "value": "@formatDateTime(utcNow(),'MM')",
+                      "type": "Expression"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "name": "GetMetadataCurated",
+              "type": "GetMetadata",
+              "description": "Verify the Parquet file was successfully written to the curated zone.",
+              "dependsOn": [
+                {
+                  "activity": "CopyToParquetCurated",
+                  "dependencyConditions": ["Succeeded"]
+                }
+              ],
+              "policy": {
+                "timeout": "0.00:10:00",
+                "retry": 1,
+                "retryIntervalInSeconds": 30,
+                "secureOutput": false,
+                "secureInput": false
+              },
+              "typeProperties": {
+                "dataset": {
+                  "referenceName": "CuratedParquetDataset",
+                  "type": "DatasetReference",
+                  "parameters": {
+                    "adlsAccountName": {
+                      "value": "@pipeline().parameters.adlsAccountName",
+                      "type": "Expression"
+                    },
+                    "year": {
+                      "value": "@formatDateTime(utcNow(),'yyyy')",
+                      "type": "Expression"
+                    },
+                    "month": {
+                      "value": "@formatDateTime(utcNow(),'MM')",
+                      "type": "Expression"
+                    }
+                  }
+                },
+                "fieldList": ["exists", "size", "lastModified"],
+                "storeSettings": {
+                  "type": "AzureBlobFSReadSettings",
+                  "recursive": false
+                }
+              }
+            },
+            {
+              "name": "WriteAuditSuccess",
+              "type": "Script",
+              "description": "Insert a success audit record into audit.pipeline_runs in the Azure SQL audit database.",
+              "dependsOn": [
+                {
+                  "activity": "GetMetadataCurated",
+                  "dependencyConditions": ["Succeeded"]
+                }
+              ],
+              "policy": {
+                "timeout": "0.00:10:00",
+                "retry": 2,
+                "retryIntervalInSeconds": 30,
+                "secureOutput": false,
+                "secureInput": true
+              },
+              "linkedServiceName": {
+                "referenceName": "AuditSqlDbLinkedService",
+                "type": "LinkedServiceReference",
+                "parameters": {
+                  "connectionString": {
+                    "value": "@pipeline().parameters.auditDbConnectionString",
+                    "type": "Expression"
+                  }
+                }
+              },
+              "typeProperties": {
+                "scripts": [
+                  {
+                    "type": "NonQuery",
+                    "text": {
+                      "value": "INSERT INTO audit.pipeline_runs (batch_id, rows_extracted, rows_validated, status, run_timestamp) VALUES ('@{activity('LookupTriggerFile').output.firstRow.batchId}', @{activity('ExtractFromSQLServer').output.rowsCopied}, @{activity('ExtractFromSQLServer').output.rowsCopied}, 'curated', '@{utcNow()}')",
+                      "type": "Expression"
+                    }
+                  }
+                ],
+                "logSettings": {
+                  "logDestination": "ActivityOutput"
+                }
+              }
+            }
+          ],
+          "ifFalseActivities": [
+            {
+              "name": "CopyToQuarantine",
+              "type": "Copy",
+              "description": "Copy staging CSV to the quarantine zone as-is for manual inspection.",
+              "dependsOn": [],
+              "policy": {
+                "timeout": "0.01:00:00",
+                "retry": 2,
+                "retryIntervalInSeconds": 30,
+                "secureOutput": false,
+                "secureInput": false
+              },
+              "typeProperties": {
+                "source": {
+                  "type": "DelimitedTextSource",
+                  "storeSettings": {
+                    "type": "AzureBlobFSReadSettings",
+                    "recursive": false
+                  },
+                  "formatSettings": {
+                    "type": "DelimitedTextReadSettings"
+                  }
+                },
+                "sink": {
+                  "type": "DelimitedTextSink",
+                  "storeSettings": {
+                    "type": "AzureBlobFSWriteSettings"
+                  },
+                  "formatSettings": {
+                    "type": "DelimitedTextWriteSettings",
+                    "quoteAllText": false,
+                    "fileExtension": ".csv"
+                  }
+                },
+                "enableStaging": false
+              },
+              "inputs": [
+                {
+                  "referenceName": "StagingCsvDataset",
+                  "type": "DatasetReference",
+                  "parameters": {
+                    "adlsAccountName": {
+                      "value": "@pipeline().parameters.adlsAccountName",
+                      "type": "Expression"
+                    },
+                    "batchId": {
+                      "value": "@activity('LookupTriggerFile').output.firstRow.batchId",
+                      "type": "Expression"
+                    }
+                  }
+                }
+              ],
+              "outputs": [
+                {
+                  "referenceName": "QuarantineCsvDataset",
+                  "type": "DatasetReference",
+                  "parameters": {
+                    "adlsAccountName": {
+                      "value": "@pipeline().parameters.adlsAccountName",
+                      "type": "Expression"
+                    },
+                    "batchId": {
+                      "value": "@activity('LookupTriggerFile').output.firstRow.batchId",
+                      "type": "Expression"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "name": "WriteErrorManifest",
+              "type": "WebActivity",
+              "description": "Write a JSON error manifest file to the quarantine zone in ADLS using the Blob REST API. The manifest captures the row count mismatch details and flags legacy currency_code values for review. Requires Managed Identity with Storage Blob Data Contributor role on the ADLS account.",
+              "dependsOn": [
+                {
+                  "activity": "CopyToQuarantine",
+                  "dependencyConditions": ["Succeeded"]
+                }
+              ],
+              "policy": {
+                "timeout": "0.00:05:00",
+                "retry": 2,
+                "retryIntervalInSeconds": 30,
+                "secureOutput": false,
+                "secureInput": false
+              },
+              "typeProperties": {
+                "method": "PUT",
+                "url": {
+                  "value": "@concat('https://', pipeline().parameters.adlsAccountName, '.blob.core.windows.net/data/quarantine/orders/error_manifest_', activity('LookupTriggerFile').output.firstRow.batchId, '.json')",
+                  "type": "Expression"
+                },
+                "headers": {
+                  "x-ms-blob-type": "BlockBlob",
+                  "Content-Type": "application/json"
+                },
+                "body": {
+                  "value": "@createObject('batchId', activity('LookupTriggerFile').output.firstRow.batchId, 'expectedRowCount', activity('LookupTriggerFile').output.firstRow.expectedRowCount, 'actualRowCount', activity('ExtractFromSQLServer').output.rowsCopied, 'deviationPct', div(mul(abs(sub(activity('ExtractFromSQLServer').output.rowsCopied, int(activity('LookupTriggerFile').output.firstRow.expectedRowCount))), 100), int(activity('LookupTriggerFile').output.firstRow.expectedRowCount)), 'validationStatus', 'row_count_mismatch', 'timestamp', utcNow(), 'notes', 'Row count deviation exceeds 5% threshold. Legacy currency_code values outside ISO 4217 preserved and flagged for review.')",
+                  "type": "Expression"
+                },
+                "authentication": {
+                  "type": "MSI",
+                  "resource": "https://storage.azure.com/"
+                }
+              }
+            },
+            {
+              "name": "WriteAuditQuarantine",
+              "type": "Script",
+              "description": "Insert a quarantine audit record into audit.pipeline_runs in the Azure SQL audit database.",
+              "dependsOn": [
+                {
+                  "activity": "WriteErrorManifest",
+                  "dependencyConditions": ["Succeeded"]
+                }
+              ],
+              "policy": {
+                "timeout": "0.00:10:00",
+                "retry": 2,
+                "retryIntervalInSeconds": 30,
+                "secureOutput": false,
+                "secureInput": true
+              },
+              "linkedServiceName": {
+                "referenceName": "AuditSqlDbLinkedService",
+                "type": "LinkedServiceReference",
+                "parameters": {
+                  "connectionString": {
+                    "value": "@pipeline().parameters.auditDbConnectionString",
+                    "type": "Expression"
+                  }
+                }
+              },
+              "typeProperties": {
+                "scripts": [
+                  {
+                    "type": "NonQuery",
+                    "text": {
+                      "value": "INSERT INTO audit.pipeline_runs (batch_id, rows_extracted, rows_validated, status, run_timestamp) VALUES ('@{activity('LookupTriggerFile').output.firstRow.batchId}', @{activity('ExtractFromSQLServer').output.rowsCopied}, 0, 'quarantined_row_count_mismatch', '@{utcNow()}')",
+                      "type": "Expression"
+                    }
+                  }
+                ],
+                "logSettings": {
+                  "logDestination": "ActivityOutput"
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "DeleteTriggerFile",
+        "type": "Delete",
+        "description": "Delete the trigger file from Blob Storage after processing to prevent re-triggering the pipeline.",
+        "dependsOn": [
+          {
+            "activity": "ValidateAndRoute",
+            "dependencyConditions": ["Succeeded"]
+          },
+          {
+            "activity": "UpdateExtractedFlag",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:10:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "dataset": {
+            "referenceName": "TriggerFileDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "triggerFilePath": {
+                "value": "@pipeline().parameters.triggerFilePath",
+                "type": "Expression"
+              }
+            }
+          },
+          "enableLogging": false,
+          "storeSettings": {
+            "type": "AzureBlobStorageReadSettings",
+            "recursive": false
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "selfHostedIRName": {
+        "type": "String",
+        "defaultValue": "SelfHostedIR_OnPrem"
+      },
+      "sqlServerHost": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "sqlDatabaseName": {
+        "type": "String",
+        "defaultValue": "OrdersDB"
+      },
+      "adlsAccountName": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "auditDbConnectionString": {
+        "type": "SecureString",
+        "defaultValue": ""
+      },
+      "triggerFilePath": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "windowStart": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "windowEnd": {
+        "type": "String",
+        "defaultValue": ""
+      }
+    },
+    "annotations": [
+      "orders-etl",
+      "on-prem",
+      "event-triggered",
+      "validation",
+      "auto-generated"
+    ],
+    "folder": {
+      "name": "ETL/Orders"
+    }
+  }
+}
