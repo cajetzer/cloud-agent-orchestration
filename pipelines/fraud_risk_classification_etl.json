@@ -1,0 +1,738 @@
+{
+  "name": "fraud_risk_classification_etl",
+  "properties": {
+    "description": "Multi-source ETL pipeline for fraud risk stratification. Extracts customer transactions from Azure SQL Database (dbo.v_daily_transactions) with DynamicRange partitioning, enriches with risk scores via batched REST API calls (up to 5,000 records/batch, parallelism 5), classifies transactions via Mapping Data Flow with Conditional Split (SHA-256 hashing applied to ip_address before writing — original value never written to Data Lake), routes enriched data to partitioned ADLS Gen2 zones (low-risk, medium-risk, high-risk, unscored), then logs processing metrics via stored procedure. If the fraud scoring API is completely unreachable after all retries, all transactions are written to the unscored/ fallback path — the pipeline does not fail. Supports daily scheduled runs at 01:00 UTC and ad-hoc date range reprocessing via manual trigger parameters.",
+    "activities": [
+      {
+        "name": "GetFraudApiKey",
+        "description": "Retrieve fraud scoring API key from Azure Key Vault using managed identity. Uses secureInput and secureOutput to prevent key exposure in monitoring logs.",
+        "type": "WebActivity",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.00:05:00",
+          "retry": 3,
+          "retryIntervalInSeconds": 30,
+          "secureInput": true,
+          "secureOutput": true
+        },
+        "typeProperties": {
+          "method": "GET",
+          "url": {
+            "value": "@concat(pipeline().parameters.keyVaultBaseUrl, '/secrets/fraud-api-key?api-version=7.4')",
+            "type": "Expression"
+          },
+          "authentication": {
+            "type": "MSI",
+            "resource": "https://vault.azure.net"
+          },
+          "headers": {}
+        }
+      },
+      {
+        "name": "SetFraudApiKey",
+        "description": "Store API key in a pipeline variable so it is accessible inside the ForEach container scope (outer activity outputs are not referenceable inside ForEach).",
+        "type": "SetVariable",
+        "dependsOn": [
+          {
+            "activity": "GetFraudApiKey",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "variableName": "fraudApiKey",
+          "value": {
+            "value": "@activity('GetFraudApiKey').output.value",
+            "type": "Expression"
+          }
+        }
+      },
+      {
+        "name": "ExtractTransactionsToStaging",
+        "description": "Extract daily transactions from dbo.v_daily_transactions using DynamicRange partitioning on transaction_timestamp (parallelCopies: 4). Writes as JSON files (max 5,000 rows/file — one file per API batch) to _staging/transactions/ for downstream ForEach iteration.",
+        "type": "Copy",
+        "dependsOn": [
+          {
+            "activity": "SetFraudApiKey",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "5.00:00:00",
+          "retry": 3,
+          "retryIntervalInSeconds": 45
+        },
+        "typeProperties": {
+          "source": {
+            "type": "AzureSqlSource",
+            "sqlReaderQuery": {
+              "value": "@concat('SELECT transaction_id, customer_id, merchant_id, amount, currency_code, transaction_timestamp, payment_method, country_code, ip_address FROM dbo.v_daily_transactions WHERE transaction_timestamp >= ''', pipeline().parameters.startDate, ' 00:00:00'' AND transaction_timestamp < ''', pipeline().parameters.endDate, ' 00:00:00''')",
+              "type": "Expression"
+            },
+            "partitionOption": "DynamicRange",
+            "partitionSettings": {
+              "partitionColumnName": "transaction_timestamp",
+              "partitionUpperBound": {
+                "value": "@pipeline().parameters.endDate",
+                "type": "Expression"
+              },
+              "partitionLowerBound": {
+                "value": "@pipeline().parameters.startDate",
+                "type": "Expression"
+              }
+            },
+            "queryTimeout": "02:00:00",
+            "isolationLevel": "ReadCommitted"
+          },
+          "sink": {
+            "type": "JsonSink",
+            "storeSettings": {
+              "type": "AzureBlobFSWriteSettings",
+              "maxRowsPerFile": 5000,
+              "fileNamePrefix": "batch_"
+            },
+            "formatSettings": {
+              "type": "JsonWriteSettings",
+              "filePattern": "arrayOfObjects"
+            }
+          },
+          "enableStaging": false,
+          "parallelCopies": 4
+        },
+        "inputs": [
+          {
+            "referenceName": "AzureSqlTransactionsDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "serverEndpoint": {
+                "value": "@pipeline().parameters.sqlServerEndpoint",
+                "type": "Expression"
+              },
+              "databaseName": {
+                "value": "@pipeline().parameters.transactionsDb",
+                "type": "Expression"
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "referenceName": "AdlsStagingTransactionsDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "adlsAccountName": {
+                "value": "@pipeline().parameters.adlsAccountName",
+                "type": "Expression"
+              },
+              "container": "fraud-analysis",
+              "folderPath": {
+                "value": "@concat('_staging/transactions/year=', formatDateTime(pipeline().parameters.startDate, 'yyyy'), '/month=', formatDateTime(pipeline().parameters.startDate, 'MM'), '/day=', formatDateTime(pipeline().parameters.startDate, 'dd'))",
+                "type": "Expression"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "GetBatchFileList",
+        "description": "List batch JSON files created by the SQL extract to drive the ForEach iteration over API enrichment batches.",
+        "type": "GetMetadata",
+        "dependsOn": [
+          {
+            "activity": "ExtractTransactionsToStaging",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:10:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 15
+        },
+        "typeProperties": {
+          "dataset": {
+            "referenceName": "AdlsStagingTransactionsDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "adlsAccountName": {
+                "value": "@pipeline().parameters.adlsAccountName",
+                "type": "Expression"
+              },
+              "container": "fraud-analysis",
+              "folderPath": {
+                "value": "@concat('_staging/transactions/year=', formatDateTime(pipeline().parameters.startDate, 'yyyy'), '/month=', formatDateTime(pipeline().parameters.startDate, 'MM'), '/day=', formatDateTime(pipeline().parameters.startDate, 'dd'))",
+                "type": "Expression"
+              }
+            }
+          },
+          "fieldList": ["childItems"],
+          "storeSettings": {
+            "type": "AzureBlobFSReadSettings",
+            "recursive": false
+          }
+        }
+      },
+      {
+        "name": "EnrichWithFraudScores",
+        "description": "Parallel ForEach over transaction batch files (max batchCount=5 concurrent iterations). Each iteration reads one batch file and POSTs up to 5,000 transaction records to the fraud scoring API. Partial API responses (fewer IDs than submitted) are handled by the downstream Data Flow — missing IDs are treated as unscored rather than failing the pipeline.",
+        "type": "ForEach",
+        "dependsOn": [
+          {
+            "activity": "GetBatchFileList",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "items": {
+            "value": "@activity('GetBatchFileList').output.childItems",
+            "type": "Expression"
+          },
+          "isSequential": false,
+          "batchCount": 5,
+          "activities": [
+            {
+              "name": "ReadBatchTransactions",
+              "description": "Read a single batch JSON file from ADLS staging. Returns up to 5,000 transaction rows for submission to the fraud scoring API.",
+              "type": "Lookup",
+              "dependsOn": [],
+              "policy": {
+                "timeout": "0.00:10:00",
+                "retry": 2,
+                "retryIntervalInSeconds": 15
+              },
+              "typeProperties": {
+                "source": {
+                  "type": "JsonSource",
+                  "storeSettings": {
+                    "type": "AzureBlobFSReadSettings",
+                    "recursive": false
+                  },
+                  "formatSettings": {
+                    "type": "JsonReadSettings"
+                  }
+                },
+                "dataset": {
+                  "referenceName": "AdlsStagingBatchFileDataset",
+                  "type": "DatasetReference",
+                  "parameters": {
+                    "adlsAccountName": {
+                      "value": "@pipeline().parameters.adlsAccountName",
+                      "type": "Expression"
+                    },
+                    "container": "fraud-analysis",
+                    "filePath": {
+                      "value": "@concat('_staging/transactions/year=', formatDateTime(pipeline().parameters.startDate, 'yyyy'), '/month=', formatDateTime(pipeline().parameters.startDate, 'MM'), '/day=', formatDateTime(pipeline().parameters.startDate, 'dd'), '/', item().name)",
+                      "type": "Expression"
+                    }
+                  }
+                },
+                "firstRowOnly": false
+              }
+            },
+            {
+              "name": "CallFraudScoringApi",
+              "description": "POST batch of transaction records to the fraud scoring API. Rate limit: 100 req/min — retry 5 times with 120s intervals handles 503 throttling responses. secureInput/secureOutput prevent API key and score data from appearing in monitoring. The API may return partial results; missing IDs are treated as unscored by the Data Flow.",
+              "type": "WebActivity",
+              "dependsOn": [
+                {
+                  "activity": "ReadBatchTransactions",
+                  "dependencyConditions": ["Succeeded"]
+                }
+              ],
+              "policy": {
+                "timeout": "0.01:00:00",
+                "retry": 5,
+                "retryIntervalInSeconds": 120,
+                "secureInput": true,
+                "secureOutput": true
+              },
+              "typeProperties": {
+                "method": "POST",
+                "url": {
+                  "value": "@pipeline().parameters.fraudScoringApiUrl",
+                  "type": "Expression"
+                },
+                "headers": {
+                  "x-api-key": {
+                    "value": "@variables('fraudApiKey')",
+                    "type": "Expression"
+                  },
+                  "Content-Type": "application/json"
+                },
+                "body": {
+                  "value": "@concat('{\"transaction_ids\":', string(activity('ReadBatchTransactions').output.value), '}')",
+                  "type": "Expression"
+                }
+              }
+            },
+            {
+              "name": "WriteBatchScoresToStaging",
+              "description": "Write fraud scoring API response for this batch to ADLS _staging/scores/ so the Data Flow can join scores with transactions. Uses Copy with REST source to stream the API response directly to ADLS, avoiding large variable payloads.",
+              "type": "Copy",
+              "dependsOn": [
+                {
+                  "activity": "CallFraudScoringApi",
+                  "dependencyConditions": ["Succeeded"]
+                }
+              ],
+              "policy": {
+                "timeout": "0.00:30:00",
+                "retry": 2,
+                "retryIntervalInSeconds": 30,
+                "secureInput": true,
+                "secureOutput": true
+              },
+              "typeProperties": {
+                "source": {
+                  "type": "RestSource",
+                  "httpRequestTimeout": "00:01:40",
+                  "requestInterval": "00.00:00:00.010",
+                  "requestMethod": "POST",
+                  "requestBody": {
+                    "value": "@concat('{\"transaction_ids\":', string(activity('ReadBatchTransactions').output.value), '}')",
+                    "type": "Expression"
+                  },
+                  "additionalHeaders": {
+                    "x-api-key": {
+                      "value": "@variables('fraudApiKey')",
+                      "type": "Expression"
+                    }
+                  }
+                },
+                "sink": {
+                  "type": "JsonSink",
+                  "storeSettings": {
+                    "type": "AzureBlobFSWriteSettings"
+                  },
+                  "formatSettings": {
+                    "type": "JsonWriteSettings",
+                    "filePattern": "setOfObjects"
+                  }
+                },
+                "enableStaging": false
+              },
+              "inputs": [
+                {
+                  "referenceName": "FraudScoringApiDataset",
+                  "type": "DatasetReference",
+                  "parameters": {
+                    "apiUrl": {
+                      "value": "@pipeline().parameters.fraudScoringApiUrl",
+                      "type": "Expression"
+                    }
+                  }
+                }
+              ],
+              "outputs": [
+                {
+                  "referenceName": "AdlsStagingScoresDataset",
+                  "type": "DatasetReference",
+                  "parameters": {
+                    "adlsAccountName": {
+                      "value": "@pipeline().parameters.adlsAccountName",
+                      "type": "Expression"
+                    },
+                    "container": "fraud-analysis",
+                    "filePath": {
+                      "value": "@concat('_staging/scores/', replace(item().name, 'batch_', 'scores_'))",
+                      "type": "Expression"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "ClassifyAndRouteDataFlow",
+        "description": "Mapping Data Flow: (1) joins transaction staging data with API enrichment scores on transaction_id using left outer join — unmatched transactions get risk_score=NULL and risk_tier='unscored'; (2) applies SHA-256 hash to ip_address column — original PII value is never written to the Data Lake; (3) routes via Conditional Split into four sinks: low-risk, medium-risk, high-risk (Snappy Parquet, partitioned year/month/day), and unscored fallback. Writes run metrics summary to _staging/metrics/. Runs even if EnrichWithFraudScores partially/fully failed, routing all unscored transactions to fallback path.",
+        "type": "ExecuteDataFlow",
+        "dependsOn": [
+          {
+            "activity": "EnrichWithFraudScores",
+            "dependencyConditions": ["Succeeded", "Failed"]
+          }
+        ],
+        "policy": {
+          "timeout": "5.00:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 60
+        },
+        "typeProperties": {
+          "dataflow": {
+            "referenceName": "fraud_risk_classification_dataflow",
+            "type": "DataFlowReference",
+            "parameters": {
+              "startDate": {
+                "value": "@pipeline().parameters.startDate",
+                "type": "Expression"
+              },
+              "endDate": {
+                "value": "@pipeline().parameters.endDate",
+                "type": "Expression"
+              },
+              "adlsAccountName": {
+                "value": "@pipeline().parameters.adlsAccountName",
+                "type": "Expression"
+              },
+              "stagingTransactionsPath": {
+                "value": "@concat('fraud-analysis/_staging/transactions/year=', formatDateTime(pipeline().parameters.startDate, 'yyyy'), '/month=', formatDateTime(pipeline().parameters.startDate, 'MM'), '/day=', formatDateTime(pipeline().parameters.startDate, 'dd'))",
+                "type": "Expression"
+              },
+              "stagingScoresPath": {
+                "value": "fraud-analysis/_staging/scores",
+                "type": "Expression"
+              },
+              "outputBasePath": {
+                "value": "@concat('fraud-analysis/year=', formatDateTime(pipeline().parameters.startDate, 'yyyy'), '/month=', formatDateTime(pipeline().parameters.startDate, 'MM'), '/day=', formatDateTime(pipeline().parameters.startDate, 'dd'))",
+                "type": "Expression"
+              },
+              "metricsPath": {
+                "value": "@concat('fraud-analysis/_staging/metrics/run_', replace(pipeline().parameters.startDate, '-', ''), '.json')",
+                "type": "Expression"
+              }
+            }
+          },
+          "compute": {
+            "coreCount": 16,
+            "computeType": "General"
+          },
+          "traceLevel": "Fine",
+          "sourceStagingConcurrency": 4
+        }
+      },
+      {
+        "name": "GetRunMetrics",
+        "description": "Read per-tier row counts from the metrics summary file written by the Data Flow. Used to populate the processing log and determine the dominant risk tier for Switch routing.",
+        "type": "Lookup",
+        "dependsOn": [
+          {
+            "activity": "ClassifyAndRouteDataFlow",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:05:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 15
+        },
+        "typeProperties": {
+          "source": {
+            "type": "JsonSource",
+            "storeSettings": {
+              "type": "AzureBlobFSReadSettings",
+              "recursive": false
+            },
+            "formatSettings": {
+              "type": "JsonReadSettings"
+            }
+          },
+          "dataset": {
+            "referenceName": "AdlsRunMetricsDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "adlsAccountName": {
+                "value": "@pipeline().parameters.adlsAccountName",
+                "type": "Expression"
+              },
+              "container": "fraud-analysis",
+              "filePath": {
+                "value": "@concat('_staging/metrics/run_', replace(pipeline().parameters.startDate, '-', ''), '.json')",
+                "type": "Expression"
+              }
+            }
+          },
+          "firstRowOnly": true
+        }
+      },
+      {
+        "name": "SetDominantRiskTier",
+        "description": "Determine the dominant risk tier (highest record count) for Switch-based post-processing routing. Ties favour higher risk (high > medium > low).",
+        "type": "SetVariable",
+        "dependsOn": [
+          {
+            "activity": "GetRunMetrics",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "variableName": "dominantRiskTier",
+          "value": {
+            "value": "@if(and(greaterOrEquals(activity('GetRunMetrics').output.firstRow.high_risk_count, activity('GetRunMetrics').output.firstRow.low_risk_count), greaterOrEquals(activity('GetRunMetrics').output.firstRow.high_risk_count, activity('GetRunMetrics').output.firstRow.medium_risk_count)), 'high', if(greaterOrEquals(activity('GetRunMetrics').output.firstRow.medium_risk_count, activity('GetRunMetrics').output.firstRow.low_risk_count), 'medium', 'low'))",
+            "type": "Expression"
+          }
+        }
+      },
+      {
+        "name": "RouteByRiskOutcome",
+        "description": "Switch on dominant risk tier to execute tier-specific post-processing. High-risk dominant runs set an elevated-risk status flag for downstream alerting. Medium and low cases set appropriate status labels. Default handles mixed or unscored-dominant runs.",
+        "type": "Switch",
+        "dependsOn": [
+          {
+            "activity": "SetDominantRiskTier",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "on": {
+            "value": "@variables('dominantRiskTier')",
+            "type": "Expression"
+          },
+          "cases": [
+            {
+              "value": "high",
+              "activities": [
+                {
+                  "name": "SetHighRiskStatus",
+                  "description": "Flag run as high-risk dominant for downstream monitoring and alerting integrations.",
+                  "type": "SetVariable",
+                  "dependsOn": [],
+                  "typeProperties": {
+                    "variableName": "pipelineStatus",
+                    "value": "completed_high_risk_dominant"
+                  }
+                }
+              ]
+            },
+            {
+              "value": "medium",
+              "activities": [
+                {
+                  "name": "SetMediumRiskStatus",
+                  "description": "Flag run as medium-risk dominant.",
+                  "type": "SetVariable",
+                  "dependsOn": [],
+                  "typeProperties": {
+                    "variableName": "pipelineStatus",
+                    "value": "completed_medium_risk_dominant"
+                  }
+                }
+              ]
+            },
+            {
+              "value": "low",
+              "activities": [
+                {
+                  "name": "SetLowRiskStatus",
+                  "description": "Flag run as low-risk dominant (normal expected state).",
+                  "type": "SetVariable",
+                  "dependsOn": [],
+                  "typeProperties": {
+                    "variableName": "pipelineStatus",
+                    "value": "completed_low_risk_dominant"
+                  }
+                }
+              ]
+            }
+          ],
+          "defaultActivities": [
+            {
+              "name": "SetMixedRiskStatus",
+              "description": "Default: mixed risk profile or unscored-dominant run.",
+              "type": "SetVariable",
+              "dependsOn": [],
+              "typeProperties": {
+                "variableName": "pipelineStatus",
+                "value": "completed_mixed_risk"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "UpdateProcessingLog",
+        "description": "Call stored procedure dbo.usp_update_transaction_processing_log to record run statistics (extracted count, per-tier counts, status). Uses managed identity — no credentials in payload. secureOutput: true prevents row counts from appearing in monitoring logs.",
+        "type": "SqlServerStoredProcedure",
+        "dependsOn": [
+          {
+            "activity": "RouteByRiskOutcome",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.01:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": true
+        },
+        "typeProperties": {
+          "storedProcedureName": "dbo.usp_update_transaction_processing_log",
+          "storedProcedureParameters": {
+            "run_date": {
+              "value": {
+                "value": "@pipeline().parameters.startDate",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "total_extracted": {
+              "value": {
+                "value": "@activity('GetRunMetrics').output.firstRow.total_extracted",
+                "type": "Expression"
+              },
+              "type": "Int32"
+            },
+            "low_risk_count": {
+              "value": {
+                "value": "@activity('GetRunMetrics').output.firstRow.low_risk_count",
+                "type": "Expression"
+              },
+              "type": "Int32"
+            },
+            "medium_risk_count": {
+              "value": {
+                "value": "@activity('GetRunMetrics').output.firstRow.medium_risk_count",
+                "type": "Expression"
+              },
+              "type": "Int32"
+            },
+            "high_risk_count": {
+              "value": {
+                "value": "@activity('GetRunMetrics').output.firstRow.high_risk_count",
+                "type": "Expression"
+              },
+              "type": "Int32"
+            },
+            "unscored_count": {
+              "value": {
+                "value": "@activity('GetRunMetrics').output.firstRow.unscored_count",
+                "type": "Expression"
+              },
+              "type": "Int32"
+            },
+            "status": {
+              "value": {
+                "value": "@variables('pipelineStatus')",
+                "type": "Expression"
+              },
+              "type": "String"
+            }
+          }
+        },
+        "linkedServiceName": {
+          "referenceName": "AzureSqlTransactionsLinkedService",
+          "type": "LinkedServiceReference",
+          "parameters": {
+            "serverEndpoint": {
+              "value": "@pipeline().parameters.sqlServerEndpoint",
+              "type": "Expression"
+            },
+            "databaseName": {
+              "value": "@pipeline().parameters.transactionsDb",
+              "type": "Expression"
+            }
+          }
+        }
+      },
+      {
+        "name": "CleanupStaging",
+        "description": "Delete _staging/ folder recursively regardless of pipeline outcome (dependsOn: Succeeded, Failed, Skipped on UpdateProcessingLog ensures this runs at end of all paths). Staging folder is always created by ExtractTransactionsToStaging; cleanup prevents accumulation of large intermediate files.",
+        "type": "Delete",
+        "dependsOn": [
+          {
+            "activity": "UpdateProcessingLog",
+            "dependencyConditions": ["Succeeded", "Failed", "Skipped"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:30:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30
+        },
+        "typeProperties": {
+          "dataset": {
+            "referenceName": "AdlsStagingRootDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "adlsAccountName": {
+                "value": "@pipeline().parameters.adlsAccountName",
+                "type": "Expression"
+              },
+              "container": "fraud-analysis",
+              "folderPath": "_staging"
+            }
+          },
+          "enableLogging": true,
+          "logStorageSettings": {
+            "linkedServiceName": {
+              "referenceName": "AdlsGen2LinkedService",
+              "type": "LinkedServiceReference",
+              "parameters": {
+                "adlsAccountName": {
+                  "value": "@pipeline().parameters.adlsAccountName",
+                  "type": "Expression"
+                }
+              }
+            },
+            "path": "fraud-analysis/_logs/delete-activity"
+          },
+          "recursive": true,
+          "maxConcurrentConnections": 2,
+          "storeSettings": {
+            "type": "AzureBlobFSReadSettings",
+            "recursive": true,
+            "enablePartitionDiscovery": false
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "sqlServerEndpoint": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "transactionsDb": {
+        "type": "String",
+        "defaultValue": "TransactionsDB"
+      },
+      "fraudScoringApiUrl": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "keyVaultBaseUrl": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "adlsAccountName": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "startDate": {
+        "type": "String",
+        "defaultValue": {
+          "value": "@formatDateTime(addDays(utcNow(), -1), 'yyyy-MM-dd')",
+          "type": "Expression"
+        }
+      },
+      "endDate": {
+        "type": "String",
+        "defaultValue": {
+          "value": "@formatDateTime(utcNow(), 'yyyy-MM-dd')",
+          "type": "Expression"
+        }
+      }
+    },
+    "variables": {
+      "fraudApiKey": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "dominantRiskTier": {
+        "type": "String",
+        "defaultValue": "mixed"
+      },
+      "pipelineStatus": {
+        "type": "String",
+        "defaultValue": "running"
+      }
+    },
+    "annotations": [
+      "fraud-analytics",
+      "multi-source",
+      "etl",
+      "data-classification"
+    ],
+    "folder": {
+      "name": "Analytics/FraudDetection"
+    }
+  }
+}
