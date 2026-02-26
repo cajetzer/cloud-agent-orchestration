@@ -33,14 +33,19 @@
     "security": {
       "description": "Security best practices",
       "flag_plaintext_secrets": true,
-      "recommend_secure_io": ["Copy", "WebActivity", "AzureFunctionActivity"],
-      "secret_keywords": ["password", "secret", "apikey", "api_key", "access_key", "token"]
+      "require_secure_io": ["Copy", "WebActivity", "AzureFunctionActivity", "Lookup"],
+      "secure_io_severity": "error",
+      "require_secure_input_on_keyvault": true,
+      "secret_keywords": ["password", "secret", "apikey", "api_key", "access_key", "token", "connectionstring", "credential"]
     },
     "organization": {
       "description": "Pipeline organization best practices",
       "require_description": true,
-      "require_annotations": false,
-      "require_folder": true
+      "description_severity": "error",
+      "require_annotations": true,
+      "annotations_severity": "warning",
+      "require_folder": true,
+      "folder_severity": "warning"
     }
   }
 }

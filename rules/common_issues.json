@@ -5,7 +5,7 @@
     "KB-001": {
       "name": "Missing Retry Policy",
       "pattern": "activity without policy.retry",
-      "severity": "warning",
+      "severity": "error",
       "description": "Activities without retry policies will fail permanently on transient errors",
       "resolution": "Add a policy block with retry: 3 and retryIntervalInSeconds: 30",
       "example_fix": {
@@ -34,7 +34,7 @@
     "KB-010": {
       "name": "Small File Iteration Anti-Pattern",
       "pattern": "ForEach activity with GetMetadata + Copy for files",
-      "severity": "warning",
+      "severity": "error",
       "description": "Iterating over many small files with ForEach is inefficient due to API overhead per file",
       "resolution": "Use wildcard file paths with enablePartitionDiscovery for bulk copy operations",
       "details": "Each Copy activity invocation has ~2-3 second overhead. For 1000 files, this adds 30-50 minutes vs seconds for bulk copy",
@@ -49,7 +49,7 @@
     "KB-011": {
       "name": "Missing Error Row Handling",
       "pattern": "Copy activity without enableSkipIncompatibleRow or redirectIncompatibleRowSettings",
-      "severity": "info",
+      "severity": "warning",
       "description": "Copy activities fail entirely on bad rows unless error handling is configured",
       "resolution": "Consider adding redirectIncompatibleRowSettings to capture bad rows for analysis",
       "example_fix": {
@@ -68,7 +68,7 @@
     "KB-012": {
       "name": "Unpartitioned Large Table Copy",
       "pattern": "Copy from SQL without partition option for tables > 1M rows",
-      "severity": "warning",
+      "severity": "error",
       "description": "Copying large tables without partitioning is slow and may timeout",
       "resolution": "Enable parallel copy with partitionOption and appropriate partitionSettings",
       "example_fix": {
@@ -101,9 +101,9 @@
       }
     },
     "KB-021": {
-      "name": "Missing SecureInput on Web Activity",
-      "pattern": "WebActivity without secureInput: true when body contains credentials",
-      "severity": "warning",
+      "name": "Missing SecureInput on Credential Activity",
+      "pattern": "WebActivity, Lookup, or Copy activity handling secrets without secureInput: true",
+      "severity": "error",
       "description": "Web activity inputs are logged unless secureInput is enabled",
       "resolution": "Set secureInput: true in the activity policy when passing sensitive data",
       "example_fix": {
@@ -129,7 +129,7 @@
     "KB-031": {
       "name": "Data Flow Without Staging",
       "pattern": "ExecuteDataFlow with PolyBase sink without staging configured",
-      "severity": "warning",
+      "severity": "error",
       "description": "PolyBase sinks require staging storage for optimal performance",
       "resolution": "Configure staging linked service and enable staging",
       "example_fix": {
@@ -145,7 +145,7 @@
     "KB-040": {
       "name": "Unbounded ForEach",
       "pattern": "ForEach without isSequential and batchCount > 20",
-      "severity": "warning",
+      "severity": "error",
       "description": "Large parallel ForEach can overwhelm downstream systems and hit API limits",
       "resolution": "Set batchCount appropriate to downstream system capacity (typically 10-20)",
       "example_fix": {
@@ -159,7 +159,7 @@
     "KB-041": {
       "name": "Missing Pipeline Parameters",
       "pattern": "Pipeline without parameters section",
-      "severity": "warning",
+      "severity": "error",
       "description": "Pipelines without parameters are not reusable across environments",
       "resolution": "Define parameters for all environment-specific values (connections, paths, dates)",
       "example_fix": {
