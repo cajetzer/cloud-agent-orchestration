@@ -41,10 +41,10 @@ For each pipeline, check these categories. Classify findings as:
 | Check | Severity |
 |-------|----------|
 | Has `name` | ERROR |
-| Has `description` | WARNING |
+| Has `description` | ERROR |
 | Has activities | ERROR |
-| Has `annotations` | INFO |
-| Has `folder` | INFO |
+| Has `annotations` | WARNING |
+| Has `folder` | WARNING |
 
 #### Activity Checks
 | Check | Severity |
@@ -56,9 +56,9 @@ For each pipeline, check these categories. Classify findings as:
 #### Policy Checks
 | Check | Severity |
 |-------|----------|
-| Has retry policy | WARNING |
+| Has retry policy | ERROR |
 | Retry 1-5 | ERROR |
-| Has timeout | WARNING |
+| Has timeout | ERROR |
 | Timeout ≤ 7 days | ERROR |
 
 #### Parameterization Checks
@@ -72,7 +72,9 @@ For each pipeline, check these categories. Classify findings as:
 | Check | Severity |
 |-------|----------|
 | No plaintext secrets | ERROR |
-| Secure I/O on credentials | WARNING |
+| Secure I/O on credentials | ERROR |
+| SecureInput on Key Vault activities | ERROR |
+| SecureInput on activities with connection strings | ERROR |
 
 ### 3. Check Knowledge Base
 
@@ -83,8 +85,9 @@ Query `rules/common_issues.json` for known issues:
 - **KB-011**: Missing Error Row Handling
 - **KB-012**: Unpartitioned Large Table Copy
 - **KB-020**: Plaintext Secret in Pipeline
-- **KB-021**: Missing SecureInput on Web Activity
+- **KB-021**: Missing SecureInput on Credential Activity
 - **KB-030**: Data Flow Without Compute Optimization
+- **KB-031**: Data Flow Without Staging
 - **KB-040**: Unbounded ForEach
 - **KB-041**: Missing Pipeline Parameters
 
