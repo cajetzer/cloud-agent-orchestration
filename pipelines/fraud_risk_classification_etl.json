@@ -59,7 +59,9 @@
         "policy": {
           "timeout": "5.00:00:00",
           "retry": 3,
-          "retryIntervalInSeconds": 45
+          "retryIntervalInSeconds": 45,
+          "secureInput": true,
+          "secureOutput": true
         },
         "typeProperties": {
           "source": {
@@ -196,7 +198,9 @@
               "policy": {
                 "timeout": "0.00:10:00",
                 "retry": 2,
-                "retryIntervalInSeconds": 15
+                "retryIntervalInSeconds": 15,
+                "secureInput": true,
+                "secureOutput": true
               },
               "typeProperties": {
                 "source": {
@@ -228,9 +232,9 @@
               }
             },
             {
-              "name": "CallFraudScoringApi",
-              "description": "POST batch of transaction records to the fraud scoring API. Rate limit: 100 req/min — retry 5 times with 120s intervals handles 503 throttling responses. secureInput/secureOutput prevent API key and score data from appearing in monitoring. The API may return partial results; missing IDs are treated as unscored by the Data Flow.",
-              "type": "WebActivity",
+              "name": "WriteBatchScoresToStaging",
+              "description": "POST batch of transaction records to the fraud scoring API and stream the response directly to ADLS _staging/scores/ for downstream Data Flow join. Retries 5 times with 120s intervals to handle rate-limit throttling. secureInput/secureOutput prevent API key and score data from appearing in monitoring logs.",
+              "type": "Copy",
               "dependsOn": [
                 {
                   "activity": "ReadBatchTransactions",
@@ -241,42 +245,6 @@
                 "timeout": "0.01:00:00",
                 "retry": 5,
                 "retryIntervalInSeconds": 120,
-                "secureInput": true,
-                "secureOutput": true
-              },
-              "typeProperties": {
-                "method": "POST",
-                "url": {
-                  "value": "@pipeline().parameters.fraudScoringApiUrl",
-                  "type": "Expression"
-                },
-                "headers": {
-                  "x-api-key": {
-                    "value": "@variables('fraudApiKey')",
-                    "type": "Expression"
-                  },
-                  "Content-Type": "application/json"
-                },
-                "body": {
-                  "value": "@concat('{\"transaction_ids\":', string(activity('ReadBatchTransactions').output.value), '}')",
-                  "type": "Expression"
-                }
-              }
-            },
-            {
-              "name": "WriteBatchScoresToStaging",
-              "description": "Write fraud scoring API response for this batch to ADLS _staging/scores/ so the Data Flow can join scores with transactions. Uses Copy with REST source to stream the API response directly to ADLS, avoiding large variable payloads.",
-              "type": "Copy",
-              "dependsOn": [
-                {
-                  "activity": "CallFraudScoringApi",
-                  "dependencyConditions": ["Succeeded"]
-                }
-              ],
-              "policy": {
-                "timeout": "0.00:30:00",
-                "retry": 2,
-                "retryIntervalInSeconds": 30,
                 "secureInput": true,
                 "secureOutput": true
               },
@@ -413,7 +381,9 @@
         "policy": {
           "timeout": "0.00:05:00",
           "retry": 2,
-          "retryIntervalInSeconds": 15
+          "retryIntervalInSeconds": 15,
+          "secureInput": true,
+          "secureOutput": true
         },
         "typeProperties": {
           "source": {
