@@ -1,0 +1,316 @@
+{
+  "name": "vendor_api_ingest_child",
+  "properties": {
+    "description": "Child pipeline for single-vendor REST API ingestion. Retrieves credentials from Azure Key Vault, authenticates via API key or OAuth2 client credentials (IfCondition branch), truncates the vendor's staging table, then copies REST API JSON data to Azure SQL Managed Instance using the NextLink pagination pattern. Handles 2,000–500,000 records per run. NOTE: OAuth2 with client certificate (V003, V007) requires a token_url, client_id, client_secret, and scope to be stored as a JSON object in the Key Vault secret rather than a plain string.",
+    "activities": [
+      {
+        "name": "GetAPISecretFromKeyVault",
+        "description": "Retrieve vendor API credential from Azure Key Vault using Managed Identity. For API-key vendors, the secret value is the key string. For OAuth2 vendors, the secret value is a JSON object with fields: token_url, client_id, client_secret, scope.",
+        "type": "WebActivity",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.00:02:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": true
+        },
+        "typeProperties": {
+          "url": {
+            "value": "@concat(pipeline().parameters.keyVaultBaseUrl, '/secrets/', pipeline().parameters.secretName, '?api-version=7.4')",
+            "type": "Expression"
+          },
+          "method": "GET",
+          "authentication": {
+            "type": "MSI",
+            "resource": "https://vault.azure.net"
+          }
+        }
+      },
+      {
+        "name": "CheckAuthType",
+        "description": "Branch on auth_type parameter. 'oauth2' path exchanges client credentials for a bearer token (HTTP POST to token_url). All other values ('apikey', 'api-key', etc.) treat the Key Vault secret as a direct API key value.",
+        "type": "IfCondition",
+        "dependsOn": [
+          {
+            "activity": "GetAPISecretFromKeyVault",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "expression": {
+            "value": "@equals(toLower(pipeline().parameters.authType), 'oauth2')",
+            "type": "Expression"
+          },
+          "ifTrueActivities": [
+            {
+              "name": "GetOAuthToken",
+              "description": "Exchange OAuth2 client credentials for a bearer token. The Key Vault secret must be a JSON string with fields: token_url, client_id, client_secret, scope. Supports standard client_credentials grant. For certificate-based flows (V003, V007), replace this activity with an Azure Function that handles the MSAL certificate auth pattern.",
+              "type": "WebActivity",
+              "dependsOn": [],
+              "policy": {
+                "timeout": "0.00:02:00",
+                "retry": 2,
+                "retryIntervalInSeconds": 30,
+                "secureInput": true,
+                "secureOutput": true
+              },
+              "typeProperties": {
+                "url": {
+                  "value": "@json(activity('GetAPISecretFromKeyVault').output.value).token_url",
+                  "type": "Expression"
+                },
+                "method": "POST",
+                "headers": {
+                  "Content-Type": "application/x-www-form-urlencoded"
+                },
+                "body": {
+                  "value": "@concat('grant_type=client_credentials&client_id=', encodeUriComponent(json(activity('GetAPISecretFromKeyVault').output.value).client_id), '&client_secret=', encodeUriComponent(json(activity('GetAPISecretFromKeyVault').output.value).client_secret), '&scope=', encodeUriComponent(json(activity('GetAPISecretFromKeyVault').output.value).scope))",
+                  "type": "Expression"
+                }
+              }
+            },
+            {
+              "name": "SetOAuthHeader",
+              "description": "Store OAuth2 bearer token in the authHeader variable for use in the Copy activity source headers.",
+              "type": "SetVariable",
+              "dependsOn": [
+                {
+                  "activity": "GetOAuthToken",
+                  "dependencyConditions": ["Succeeded"]
+                }
+              ],
+              "typeProperties": {
+                "variableName": "authHeader",
+                "value": {
+                  "value": "@concat('Bearer ', activity('GetOAuthToken').output.access_token)",
+                  "type": "Expression"
+                }
+              }
+            }
+          ],
+          "ifFalseActivities": [
+            {
+              "name": "SetAPIKeyHeader",
+              "description": "Store the API key from Key Vault in the authHeader variable. Header format follows common 'ApiKey <value>' convention; adjust if vendor requires a different scheme (e.g., 'X-API-Key').",
+              "type": "SetVariable",
+              "dependsOn": [],
+              "typeProperties": {
+                "variableName": "authHeader",
+                "value": {
+                  "value": "@concat('ApiKey ', activity('GetAPISecretFromKeyVault').output.value)",
+                  "type": "Expression"
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "TruncateStagingTable",
+        "description": "Execute dbo.usp_truncate_staging_table to clear the vendor's staging table before loading fresh data. The stored procedure accepts @targetTable to safely TRUNCATE the specified table within the staging schema.",
+        "type": "SqlServerStoredProcedure",
+        "dependsOn": [
+          {
+            "activity": "CheckAuthType",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:05:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "linkedServiceName": {
+          "referenceName": "AzureSqlManagedInstanceLinkedService",
+          "type": "LinkedServiceReference",
+          "parameters": {
+            "managedInstanceFqdn": {
+              "value": "@pipeline().parameters.managedInstanceFqdn",
+              "type": "Expression"
+            },
+            "inventoryDbName": {
+              "value": "@pipeline().parameters.inventoryDbName",
+              "type": "Expression"
+            }
+          }
+        },
+        "typeProperties": {
+          "storedProcedureName": "[dbo].[usp_truncate_staging_table]",
+          "storedProcedureParameters": {
+            "targetTable": {
+              "value": {
+                "value": "@pipeline().parameters.targetTable",
+                "type": "Expression"
+              },
+              "type": "String"
+            }
+          }
+        }
+      },
+      {
+        "name": "CopyVendorAPIData",
+        "description": "Copy REST API JSON data to SQL MI staging table. The REST connector handles NextLink pagination natively (paginationRules.AbsoluteUrl: '$.nextLink') — suitable for vendor V001 returning up to 500K records. Dynamic Authorization header sourced from authHeader variable (set by CheckAuthType). Retry twice with 60s interval to handle transient errors and HTTP 429 rate limiting (built-in retry waits ~60s between attempts).",
+        "type": "Copy",
+        "dependsOn": [
+          {
+            "activity": "TruncateStagingTable",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:30:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 60,
+          "secureInput": true,
+          "secureOutput": false
+        },
+        "typeProperties": {
+          "source": {
+            "type": "RestSource",
+            "httpRequestTimeout": "00:05:00",
+            "requestInterval": "00.00:00:00.010",
+            "paginationRules": {
+              "AbsoluteUrl": "$.nextLink"
+            },
+            "additionalHeaders": {
+              "Authorization": {
+                "value": "@variables('authHeader')",
+                "type": "Expression"
+              }
+            }
+          },
+          "sink": {
+            "type": "SqlMISink",
+            "writeBehavior": "insert",
+            "sqlWriterUseTableLock": false,
+            "disableMetricsCollection": false
+          },
+          "enableStaging": false,
+          "translator": {
+            "type": "TabularTranslator",
+            "mappings": [
+              {
+                "source": { "path": "sku" },
+                "sink": { "name": "sku", "type": "String" }
+              },
+              {
+                "source": { "path": "product_name" },
+                "sink": { "name": "product_name", "type": "String" }
+              },
+              {
+                "source": { "path": "quantity_on_hand" },
+                "sink": { "name": "quantity_on_hand", "type": "Int32" }
+              },
+              {
+                "source": { "path": "warehouse_location" },
+                "sink": { "name": "warehouse_location", "type": "String" }
+              },
+              {
+                "source": { "path": "last_updated" },
+                "sink": { "name": "last_updated", "type": "DateTime" }
+              },
+              {
+                "source": { "path": "unit_price" },
+                "sink": { "name": "unit_price", "type": "Decimal" }
+              }
+            ],
+            "mapComplexValuesToString": false,
+            "collectionReference": {
+              "value": "@pipeline().parameters.responseRootPath",
+              "type": "Expression"
+            }
+          }
+        },
+        "inputs": [
+          {
+            "referenceName": "VendorRestAPIDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "apiUrl": {
+                "value": "@pipeline().parameters.apiUrl",
+                "type": "Expression"
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "referenceName": "SqlMIStagingDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "targetTable": {
+                "value": "@pipeline().parameters.targetTable",
+                "type": "Expression"
+              },
+              "managedInstanceFqdn": {
+                "value": "@pipeline().parameters.managedInstanceFqdn",
+                "type": "Expression"
+              },
+              "inventoryDbName": {
+                "value": "@pipeline().parameters.inventoryDbName",
+                "type": "Expression"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "parameters": {
+      "vendorId": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "apiUrl": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "authType": {
+        "type": "String",
+        "defaultValue": "apikey"
+      },
+      "secretName": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "responseRootPath": {
+        "type": "String",
+        "defaultValue": "$.data.items"
+      },
+      "targetTable": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "keyVaultBaseUrl": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "managedInstanceFqdn": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "inventoryDbName": {
+        "type": "String",
+        "defaultValue": "InventoryDB"
+      }
+    },
+    "variables": {
+      "authHeader": {
+        "type": "String",
+        "defaultValue": ""
+      }
+    },
+    "annotations": [
+      "vendor-inventory",
+      "rest-api",
+      "child-pipeline",
+      "metadata-driven",
+      "auto-generated"
+    ],
+    "folder": {
+      "name": "Ingestion/VendorFeeds"
+    }
+  }
+}

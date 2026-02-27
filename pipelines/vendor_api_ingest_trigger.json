@@ -1,0 +1,37 @@
+{
+  "name": "vendor_api_ingest_trigger",
+  "properties": {
+    "description": "Schedule trigger for vendor_api_ingest_parent: runs twice daily at 04:00 UTC and 16:00 UTC. Configure pipeline parameters (configDbConnectionString, keyVaultBaseUrl, managedInstanceFqdn, inventoryDbName) in the trigger parameter settings before activating.",
+    "type": "ScheduleTrigger",
+    "typeProperties": {
+      "recurrence": {
+        "frequency": "Day",
+        "interval": 1,
+        "schedule": {
+          "hours": [4, 16],
+          "minutes": [0]
+        },
+        "timeZone": "UTC"
+      }
+    },
+    "pipelines": [
+      {
+        "pipelineReference": {
+          "referenceName": "vendor_api_ingest_parent",
+          "type": "PipelineReference"
+        },
+        "parameters": {
+          "configDbConnectionString": "",
+          "keyVaultBaseUrl": "",
+          "managedInstanceFqdn": "",
+          "inventoryDbName": "InventoryDB"
+        }
+      }
+    ],
+    "annotations": [
+      "vendor-inventory",
+      "schedule",
+      "auto-generated"
+    ]
+  }
+}
