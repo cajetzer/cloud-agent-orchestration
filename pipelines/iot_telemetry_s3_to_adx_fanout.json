@@ -1,0 +1,423 @@
+{
+  "name": "iot_telemetry_s3_to_adx_fanout",
+  "properties": {
+    "description": "Fan-out ingestion of IoT telemetry data from Amazon S3 Parquet partitions (Snappy-compressed) into Azure Data Explorer (Kusto). Dynamically discovers region partitions at runtime and processes each independently via a parallel ForEach loop for maximum throughput and per-region error isolation. Resolves #72.",
+    "activities": [
+      {
+        "name": "LookupAWSCredentials",
+        "description": "Retrieve AWS Access Key credentials from Azure Key Vault. secureInput and secureOutput are enabled to prevent credential exposure in logs.",
+        "type": "Lookup",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.00:05:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": true,
+          "secureInput": true
+        },
+        "typeProperties": {
+          "source": {
+            "type": "RestSource",
+            "httpRequestTimeout": "00:01:00",
+            "requestInterval": "00.00:00:00.010",
+            "requestMethod": "GET"
+          },
+          "dataset": {
+            "referenceName": "DS_KeyVault_Secret",
+            "type": "DatasetReference",
+            "parameters": {
+              "keyVaultBaseUrl": "@pipeline().parameters.keyVaultBaseUrl",
+              "secretName": "@pipeline().parameters.keyVaultSecretName"
+            }
+          },
+          "firstRowOnly": true
+        }
+      },
+      {
+        "name": "GetMetadataRegionPartitions",
+        "description": "Dynamically discover all region partition folders in the S3 bucket root (e.g., region=us-east/, region=eu-west/). Output childItems drives the ForEach loop.",
+        "type": "GetMetadata",
+        "dependsOn": [
+          {
+            "activity": "LookupAWSCredentials",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:10:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "dataset": {
+            "referenceName": "DS_S3_Root_Parquet",
+            "type": "DatasetReference",
+            "parameters": {
+              "s3BucketPath": "@pipeline().parameters.s3BucketPath"
+            }
+          },
+          "fieldList": ["childItems"],
+          "storeSettings": {
+            "type": "AmazonS3ReadSettings",
+            "recursive": false,
+            "enablePartitionDiscovery": false
+          }
+        }
+      },
+      {
+        "name": "ForEachRegion",
+        "description": "Iterate over each discovered region partition in parallel (isSequential=false). batchCount=6 supports current region count; grow to 12 as needed. Failure in one region does not block others.",
+        "type": "ForEach",
+        "dependsOn": [
+          {
+            "activity": "GetMetadataRegionPartitions",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "items": {
+            "value": "@activity('GetMetadataRegionPartitions').output.childItems",
+            "type": "Expression"
+          },
+          "isSequential": false,
+          "batchCount": 6,
+          "activities": [
+            {
+              "name": "GetMetadataPartitionFiles",
+              "description": "Check whether any Parquet files exist for this region within the current tumbling window date path. Empty partitions are skipped silently.",
+              "type": "GetMetadata",
+              "dependsOn": [],
+              "policy": {
+                "timeout": "0.00:05:00",
+                "retry": 2,
+                "retryIntervalInSeconds": 30,
+                "secureOutput": false,
+                "secureInput": false
+              },
+              "typeProperties": {
+                "dataset": {
+                  "referenceName": "DS_S3_Region_Parquet",
+                  "type": "DatasetReference",
+                  "parameters": {
+                    "s3BucketPath": "@pipeline().parameters.s3BucketPath",
+                    "regionPartition": "@item().name",
+                    "windowStart": "@pipeline().parameters.triggerWindowStart",
+                    "windowEnd": "@pipeline().parameters.triggerWindowEnd"
+                  }
+                },
+                "fieldList": ["childItems"],
+                "storeSettings": {
+                  "type": "AmazonS3ReadSettings",
+                  "recursive": true,
+                  "wildcardFileName": "*.parquet",
+                  "enablePartitionDiscovery": false
+                }
+              }
+            },
+            {
+              "name": "IfConditionHasFiles",
+              "description": "Only proceed if files were found for this region partition in the current window. Empty partitions are silently skipped (no error raised).",
+              "type": "IfCondition",
+              "dependsOn": [
+                {
+                  "activity": "GetMetadataPartitionFiles",
+                  "dependencyConditions": ["Succeeded"]
+                }
+              ],
+              "typeProperties": {
+                "expression": {
+                  "value": "@greater(length(activity('GetMetadataPartitionFiles').output.childItems), 0)",
+                  "type": "Expression"
+                },
+                "ifTrueActivities": [
+                  {
+                    "name": "CopyParquetToADX",
+                    "description": "Copy Snappy-compressed Parquet files from the S3 region partition into Azure Data Explorer RawTelemetry table using the pre-defined ParquetTelemetryMapping ingestion mapping.",
+                    "type": "Copy",
+                    "dependsOn": [],
+                    "policy": {
+                      "timeout": "0.06:00:00",
+                      "retry": 3,
+                      "retryIntervalInSeconds": 60,
+                      "secureOutput": false,
+                      "secureInput": false
+                    },
+                    "typeProperties": {
+                      "source": {
+                        "type": "ParquetSource",
+                        "storeSettings": {
+                          "type": "AmazonS3ReadSettings",
+                          "recursive": true,
+                          "wildcardFolderPath": {
+                            "value": "@concat(pipeline().parameters.s3BucketPath, '/', item().name)",
+                            "type": "Expression"
+                          },
+                          "wildcardFileName": "*.parquet",
+                          "enablePartitionDiscovery": false
+                        },
+                        "formatSettings": {
+                          "type": "ParquetReadSettings"
+                        }
+                      },
+                      "sink": {
+                        "type": "AzureDataExplorerSink",
+                        "ingestionMappingName": "ParquetTelemetryMapping",
+                        "ingestionMappingKind": "Parquet",
+                        "flushImmediately": false
+                      },
+                      "enableStaging": false,
+                      "translator": {
+                        "type": "TabularTranslator",
+                        "typeConversion": true,
+                        "typeConversionSettings": {
+                          "allowDataTruncation": false,
+                          "treatBooleanAsNumber": false
+                        }
+                      }
+                    },
+                    "inputs": [
+                      {
+                        "referenceName": "DS_S3_Region_Parquet",
+                        "type": "DatasetReference",
+                        "parameters": {
+                          "s3BucketPath": "@pipeline().parameters.s3BucketPath",
+                          "regionPartition": "@item().name",
+                          "windowStart": "@pipeline().parameters.triggerWindowStart",
+                          "windowEnd": "@pipeline().parameters.triggerWindowEnd"
+                        }
+                      }
+                    ],
+                    "outputs": [
+                      {
+                        "referenceName": "DS_ADX_RawTelemetry",
+                        "type": "DatasetReference",
+                        "parameters": {
+                          "adxClusterUri": "@pipeline().parameters.adxClusterUri",
+                          "adxDatabase": "@pipeline().parameters.adxDatabase"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "name": "CopyLogIngestionError",
+                    "description": "On failure of the copy activity, log the error details (region, run ID, window timestamps) to the IngestionErrors table in ADX for observability. Pipeline continues processing remaining regions.",
+                    "type": "Copy",
+                    "dependsOn": [
+                      {
+                        "activity": "CopyParquetToADX",
+                        "dependencyConditions": ["Failed"]
+                      }
+                    ],
+                    "policy": {
+                      "timeout": "0.00:05:00",
+                      "retry": 2,
+                      "retryIntervalInSeconds": 30,
+                      "secureOutput": false,
+                      "secureInput": false
+                    },
+                    "typeProperties": {
+                      "source": {
+                        "type": "AzureDataExplorerSource",
+                        "query": {
+                          "value": "@concat('print error_time=now(), region=\"', item().name, '\", pipeline_run_id=\"', pipeline().RunId, '\", window_start=datetime(\"', pipeline().parameters.triggerWindowStart, '\"), window_end=datetime(\"', pipeline().parameters.triggerWindowEnd, '\"), error_message=\"CopyParquetToADX activity failed\"')",
+                          "type": "Expression"
+                        },
+                        "queryTimeout": "00:02:00",
+                        "noTruncation": false
+                      },
+                      "sink": {
+                        "type": "AzureDataExplorerSink",
+                        "ingestionMappingName": "",
+                        "flushImmediately": true
+                      },
+                      "enableStaging": false
+                    },
+                    "inputs": [
+                      {
+                        "referenceName": "DS_ADX_RawTelemetry",
+                        "type": "DatasetReference",
+                        "parameters": {
+                          "adxClusterUri": "@pipeline().parameters.adxClusterUri",
+                          "adxDatabase": "@pipeline().parameters.adxDatabase"
+                        }
+                      }
+                    ],
+                    "outputs": [
+                      {
+                        "referenceName": "DS_ADX_IngestionErrors",
+                        "type": "DatasetReference",
+                        "parameters": {
+                          "adxClusterUri": "@pipeline().parameters.adxClusterUri",
+                          "adxDatabase": "@pipeline().parameters.adxDatabase"
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "ifFalseActivities": []
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "parameters": {
+      "s3BucketPath": {
+        "type": "String",
+        "defaultValue": "iot-telemetry-raw",
+        "description": "S3 bucket name (without s3:// prefix). Example: iot-telemetry-raw"
+      },
+      "adxClusterUri": {
+        "type": "String",
+        "defaultValue": "",
+        "description": "Azure Data Explorer cluster URI. Example: https://<cluster>.<region>.kusto.windows.net"
+      },
+      "adxDatabase": {
+        "type": "String",
+        "defaultValue": "TelemetryDB",
+        "description": "Target ADX database name."
+      },
+      "keyVaultSecretName": {
+        "type": "String",
+        "defaultValue": "",
+        "description": "Name of the Key Vault secret containing the AWS Access Key (JSON with accessKeyId and secretAccessKey)."
+      },
+      "keyVaultBaseUrl": {
+        "type": "String",
+        "defaultValue": "",
+        "description": "Azure Key Vault base URL. Example: https://<vault-name>.vault.azure.net"
+      },
+      "triggerWindowStart": {
+        "type": "String",
+        "defaultValue": "",
+        "description": "Tumbling window start time (UTC ISO 8601). Populated automatically by the tumbling window trigger via @{triggerOutputs().windowStartTime}."
+      },
+      "triggerWindowEnd": {
+        "type": "String",
+        "defaultValue": "",
+        "description": "Tumbling window end time (UTC ISO 8601). Populated automatically by the tumbling window trigger via @{triggerOutputs().windowEndTime}."
+      }
+    },
+    "annotations": ["iot-telemetry", "cross-cloud", "fan-out", "auto-generated"],
+    "folder": {
+      "name": "Ingestion/IoT"
+    },
+    "policy": {
+      "elapsedTimeMetric": {
+        "duration": "0.06:00:00"
+      }
+    }
+  },
+  "_comments": {
+    "trigger_configuration": {
+      "description": "Tumbling window trigger definition — deploy as a separate ADF trigger resource linked to this pipeline.",
+      "trigger": {
+        "name": "twt_iot_telemetry_s3_to_adx_4h",
+        "type": "TumblingWindowTrigger",
+        "typeProperties": {
+          "frequency": "Hour",
+          "interval": 4,
+          "startTime": "2026-01-01T00:00:00Z",
+          "delay": "00:15:00",
+          "maxConcurrency": 2,
+          "retryPolicy": {
+            "count": 3,
+            "intervalInSeconds": 900
+          },
+          "dependsOn": [
+            {
+              "type": "TumblingWindowTriggerDependencyReference",
+              "referenceTrigger": {
+                "referenceName": "twt_iot_device_registry_sync",
+                "type": "TriggerReference"
+              },
+              "offset": "00:00:00",
+              "size": "04:00:00"
+            }
+          ]
+        },
+        "pipeline": {
+          "pipelineReference": {
+            "referenceName": "iot_telemetry_s3_to_adx_fanout",
+            "type": "PipelineReference"
+          },
+          "parameters": {
+            "s3BucketPath": "@{triggerBody().s3BucketPath}",
+            "adxClusterUri": "@{triggerBody().adxClusterUri}",
+            "adxDatabase": "@{triggerBody().adxDatabase}",
+            "keyVaultSecretName": "@{triggerBody().keyVaultSecretName}",
+            "keyVaultBaseUrl": "@{triggerBody().keyVaultBaseUrl}",
+            "triggerWindowStart": "@{triggerOutputs().windowStartTime}",
+            "triggerWindowEnd": "@{triggerOutputs().windowEndTime}"
+          }
+        }
+      }
+    },
+    "datasets_required": [
+      {
+        "name": "DS_KeyVault_Secret",
+        "type": "RestResource",
+        "description": "REST dataset pointing to Azure Key Vault secrets endpoint. Parameterized with keyVaultBaseUrl and secretName.",
+        "linkedService": "LS_AzureKeyVault",
+        "relativeUrl": "@concat('secrets/', dataset().secretName, '?api-version=7.0')"
+      },
+      {
+        "name": "DS_S3_Root_Parquet",
+        "type": "Parquet",
+        "description": "Amazon S3 dataset pointing to the bucket root for listing region partition folders.",
+        "linkedService": "LS_AmazonS3",
+        "bucketName": "@dataset().s3BucketPath",
+        "key": ""
+      },
+      {
+        "name": "DS_S3_Region_Parquet",
+        "type": "Parquet",
+        "description": "Amazon S3 dataset for a specific region partition with date-partitioned path filter.",
+        "linkedService": "LS_AmazonS3",
+        "bucketName": "@dataset().s3BucketPath",
+        "key": "@concat(dataset().regionPartition, '/year=', formatDateTime(dataset().windowStart, 'yyyy'), '/month=', formatDateTime(dataset().windowStart, 'MM'), '/day=', formatDateTime(dataset().windowStart, 'dd'), '/')",
+        "compression": {
+          "type": "snappy"
+        }
+      },
+      {
+        "name": "DS_ADX_RawTelemetry",
+        "type": "AzureDataExplorerTable",
+        "description": "ADX RawTelemetry table dataset. Parameterized with cluster URI and database.",
+        "linkedService": "LS_AzureDataExplorer",
+        "clusterUri": "@dataset().adxClusterUri",
+        "database": "@dataset().adxDatabase",
+        "table": "RawTelemetry"
+      },
+      {
+        "name": "DS_ADX_IngestionErrors",
+        "type": "AzureDataExplorerTable",
+        "description": "ADX IngestionErrors table dataset for error logging.",
+        "linkedService": "LS_AzureDataExplorer",
+        "clusterUri": "@dataset().adxClusterUri",
+        "database": "@dataset().adxDatabase",
+        "table": "IngestionErrors"
+      }
+    ],
+    "linked_services_required": [
+      {
+        "name": "LS_AmazonS3",
+        "type": "AmazonS3",
+        "description": "Amazon S3 linked service. Configure accessKeyId and secretAccessKey to reference Azure Key Vault secrets (do NOT store credentials inline).",
+        "s3Region": "us-east-1"
+      },
+      {
+        "name": "LS_AzureDataExplorer",
+        "type": "AzureDataExplorer",
+        "description": "Azure Data Explorer linked service using managed identity authentication."
+      },
+      {
+        "name": "LS_AzureKeyVault",
+        "type": "AzureKeyVault",
+        "description": "Azure Key Vault linked service for secret retrieval."
+      }
+    ]
+  }
+}
