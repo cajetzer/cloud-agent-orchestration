@@ -5,6 +5,8 @@ A comprehensive guide to configuring MCP servers for use by GitHub Copilot acros
 > **Last Updated:** March 2026  
 > **Status:** MCP support in VS Code is Generally Available (GA as of July 2025). GitHub.com Coding Agent MCP is in Technical Preview.
 
+> **IDE Scope:** This guide focuses on **VS Code** for IDE configuration examples. At the time of this writing, GitHub Copilot MCP support is also Generally Available in **JetBrains IDEs** (IntelliJ, PyCharm, WebStorm, etc.), **Eclipse**, and **Xcode**, with Visual Studio offering partial MCP support in preview. While core MCP concepts are consistent across IDEs, configuration file locations, schema details, and specific features may differ. Refer to the [Copilot feature matrix](https://docs.github.com/en/copilot/reference/copilot-feature-matrix) and the IDE-specific tabs in the [MCP documentation](https://docs.github.com/en/copilot/how-tos/provide-context/use-mcp/extend-copilot-chat-with-mcp) for guidance on other editors.
+
 ## 1. Local vs. Remote MCP Servers
 
 MCP servers can run in two fundamentally different modes:
