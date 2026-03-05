@@ -94,7 +94,7 @@ VS Code uses a dedicated `mcp.json` file with a **`servers`** top-level key:
 
 ### Copilot CLI Configuration (`~/.copilot/mcp-config.json`)
 
-Copilot CLI uses a separate config file with a `"mcpServers"` top-level key. It supports `type` values of `"local"` / `"stdio"` for local servers and `"http"` / `"sse"` for remote servers. Using `"stdio"` is recommended if you want your configuration to be compatible with both VS Code and the Coding Agent.
+Copilot CLI uses a separate config file with a `"mcpServers"` top-level key. It supports `type` values of `"local"` / `"stdio"` for local servers and `"http"` / `"sse"` for remote servers. Using `"stdio"` is recommended if you want your configuration to be compatible for cross-client compatibility (VS Code, Coding Agent, etc.).
 
 ```json
 {
@@ -116,7 +116,7 @@ Copilot CLI uses a separate config file with a `"mcpServers"` top-level key. It 
 - **Management:** Use `/mcp add`, `/mcp show`, `/mcp remove`, `/mcp edit`, `/mcp delete`, `/mcp enable`, `/mcp disable` commands
 - **Schema:** Uses `"mcpServers"` (same key as GitHub.com, different from VS Code's `"servers"`)
 - **Secrets:** Uses shell environment variable expansion (`${VAR_NAME}`)
-- **Tools:** Supports a `"tools"` field to control which tools are available (use `["*"]` for all, or a list of tool names)
+- **Tools:** Supports an optional `"tools"` field to control which tools are available. Use `["*"]` for all (default behavior if not included), or a list of allowed tool names.
 
 **Reference:** [Adding MCP servers for GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers)
 
@@ -180,13 +180,12 @@ COPILOT_MCP_AZURE_CLIENT_SECRET = <your-client-secret>
 }
 ```
 **Schema Requirements:**
-- **`type`:** REQUIRED — must be `"stdio"`, `"http"`, or `"sse"`
+- **`type`:** REQUIRED — must be `"local"`, `"stdio"`, `"http"`, or `"sse"`
 - **`tools`:** REQUIRED — explicit allowlist of tools (use `["*"]` for all, but prefer a minimal list for least privilege)
 - **`command`/`args`:** For stdio servers, the command to spawn the MCP server process
 - **`env`:** Environment variables passed to the server (use `$COPILOT_MCP_*` for secrets)
 
 **What WON'T work:**
-- `.github/mcp.json` file (Coding Agent ignores this — use Settings UI)
 - `${{ secrets.X }}` syntax (that's for Actions, not Copilot)
 - OAuth-based remote MCP servers (not currently supported)
 - Private network endpoints (must be publicly accessible)
@@ -267,7 +266,7 @@ Pass credentials as environment variables to the MCP server process. This works 
 }
 ```
 
-**Copilot CLI — shell environment expansion:**
+**Copilot CLI — shell-level environment expansion:**
 ```json
 {
   "mcpServers": {
@@ -386,7 +385,7 @@ The Azure MCP Server then uses the authenticated session — no client secret ne
 **References:**
 - [VS Code MCP Configuration Reference](https://code.visualstudio.com/docs/copilot/reference/mcp-configuration)
 - [Extending Coding Agent with MCP](https://docs.github.com/en/copilot/how-tos/agents/copilot-coding-agent/extending-copilot-coding-agent-with-mcp)
-- [Secure MCP Servers with Microsoft Entra](https://learn.microsoft.com/azure/app-service/configure-authentication-mcp-server-vscode)
+- [Secure MCP Servers with Microsoft Entra](https://learn.microsoft.com/azure/app-service/configure-authentication-mcp-server-vscode) - example of using Microsoft Entra for secure authentication to an MCP server hosted on Azure App Service
 
 ## 4. **Multiple Configurations**
 
