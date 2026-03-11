@@ -1,0 +1,133 @@
+{
+  "name": "daily_copy_table_storage_to_snowflake",
+  "properties": {
+    "description": "Daily copy of CustomerSubscriptions from Azure Table Storage to Snowflake BILLING_DW.STAGING.STG_CUSTOMER_SUBSCRIPTIONS for finance team billing reconciliation dashboards. Filters source rows to the last 24 hours using an OData timestamp filter. Truncates the staging table before load. Runs at 05:30 UTC.",
+    "activities": [
+      {
+        "name": "CopyCustomerSubscriptions",
+        "type": "Copy",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.02:00:00",
+          "retry": 3,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": true,
+          "secureInput": true
+        },
+        "typeProperties": {
+          "source": {
+            "type": "AzureTableSource",
+            "azureTableSourceQuery": {
+              "value": "@concat('Timestamp ge datetime''', formatDateTime(addHours(utcnow(), -24), 'yyyy-MM-ddTHH:mm:ss'), '''')",
+              "type": "Expression"
+            },
+            "azureTableSourceIgnoreTableNotFound": false
+          },
+          "sink": {
+            "type": "SnowflakeV2Sink",
+            "preCopyScript": "TRUNCATE TABLE STAGING.STG_CUSTOMER_SUBSCRIPTIONS",
+            "importSettings": {
+              "type": "SnowflakeImportCopyCommand"
+            }
+          },
+          "enableStaging": false,
+          "translator": {
+            "type": "TabularTranslator",
+            "mappings": [
+              {
+                "source": { "name": "PartitionKey", "type": "String" },
+                "sink":   { "name": "PartitionKey", "type": "String" }
+              },
+              {
+                "source": { "name": "RowKey", "type": "String" },
+                "sink":   { "name": "RowKey", "type": "String" }
+              },
+              {
+                "source": { "name": "customer_id", "type": "String" },
+                "sink":   { "name": "customer_id", "type": "String" }
+              },
+              {
+                "source": { "name": "plan_name", "type": "String" },
+                "sink":   { "name": "plan_name", "type": "String" }
+              },
+              {
+                "source": { "name": "monthly_amount", "type": "String" },
+                "sink":   { "name": "monthly_amount", "type": "Decimal" }
+              },
+              {
+                "source": { "name": "currency", "type": "String" },
+                "sink":   { "name": "currency", "type": "String" }
+              },
+              {
+                "source": { "name": "start_date", "type": "String" },
+                "sink":   { "name": "start_date", "type": "DateTime" }
+              },
+              {
+                "source": { "name": "renewal_date", "type": "String" },
+                "sink":   { "name": "renewal_date", "type": "DateTime" }
+              },
+              {
+                "source": { "name": "is_active", "type": "String" },
+                "sink":   { "name": "is_active", "type": "Boolean" }
+              }
+            ],
+            "typeConversion": true,
+            "typeConversionSettings": {
+              "allowDataTruncation": false,
+              "treatBooleanAsNumber": false
+            }
+          }
+        },
+        "inputs": [
+          {
+            "referenceName": "AzureTableStorageSource",
+            "type": "DatasetReference",
+            "parameters": {
+              "storageAccountName": {
+                "value": "@pipeline().parameters.storageAccountName",
+                "type": "Expression"
+              },
+              "tableName": "CustomerSubscriptions"
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "referenceName": "SnowflakeSinkDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "snowflakeDatabase": {
+                "value": "@pipeline().parameters.snowflakeDatabase",
+                "type": "Expression"
+              },
+              "snowflakeSchema": "STAGING",
+              "snowflakeTable": "STG_CUSTOMER_SUBSCRIPTIONS"
+            }
+          }
+        ]
+      }
+    ],
+    "parameters": {
+      "storageAccountName": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "snowflakeAccountUrl": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "snowflakeDatabase": {
+        "type": "String",
+        "defaultValue": "BILLING_DW"
+      },
+      "keyVaultBaseUrl": {
+        "type": "String",
+        "defaultValue": ""
+      }
+    },
+    "annotations": ["auto-generated", "billing", "table-storage", "snowflake"],
+    "folder": {
+      "name": "Finance/BillingReconciliation"
+    }
+  }
+}
