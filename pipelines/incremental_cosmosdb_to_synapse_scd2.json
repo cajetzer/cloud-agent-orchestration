@@ -1,0 +1,273 @@
+{
+  "name": "incremental_cosmosdb_to_synapse_scd2",
+  "properties": {
+    "description": "Incrementally captures product catalog changes from Azure Cosmos DB change feed and applies SCD Type 2 updates to dim.dim_product_scd2 in Azure Synapse Analytics. Reads the last processed timestamp from an Azure SQL watermark table, executes a Mapping Data Flow for flatten/SCD2 logic, and updates the watermark after each successful run. Dead-letters malformed documents to Blob Storage and sends failure notifications via a Logic App webhook.",
+    "activities": [
+      {
+        "name": "LookupWatermark",
+        "description": "Read the last successfully processed Cosmos DB _ts watermark from the Azure SQL watermark table.",
+        "type": "Lookup",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.00:05:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 90
+        },
+        "typeProperties": {
+          "source": {
+            "type": "AzureSqlSource",
+            "sqlReaderQuery": "SELECT ISNULL(last_processed_ts, 0) AS last_processed_ts FROM etl.watermark WHERE pipeline_name = 'incremental_cosmosdb_to_synapse_scd2'",
+            "queryTimeout": "00:02:00"
+          },
+          "dataset": {
+            "referenceName": "ds_watermark_sql",
+            "type": "DatasetReference"
+          },
+          "firstRowOnly": true
+        },
+        "secureOutput": true
+      },
+      {
+        "name": "SCD2ProductCatalogDataFlow",
+        "description": "Mapping Data Flow: reads Cosmos DB change feed documents since last watermark, flattens the nested pricing object, applies Alter Row SCD2 logic (insert new, update current, expire old), stages into Synapse using HASH(product_id) distribution, and dead-letters malformed records to Blob Storage.",
+        "type": "ExecuteDataFlow",
+        "dependsOn": [
+          {
+            "activity": "LookupWatermark",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.02:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 90
+        },
+        "typeProperties": {
+          "dataflow": {
+            "referenceName": "df_product_catalog_scd2",
+            "type": "DataFlowReference",
+            "parameters": {
+              "lastProcessedTs": {
+                "value": "@string(activity('LookupWatermark').output.firstRow.last_processed_ts)",
+                "type": "Expression"
+              },
+              "cosmosDbAccountUri": {
+                "value": "@pipeline().parameters.cosmosDbAccountUri",
+                "type": "Expression"
+              },
+              "cosmosDbDatabaseName": {
+                "value": "@pipeline().parameters.cosmosDbDatabaseName",
+                "type": "Expression"
+              },
+              "synapseEndpoint": {
+                "value": "@pipeline().parameters.synapseEndpoint",
+                "type": "Expression"
+              },
+              "synapseDatabaseName": {
+                "value": "@pipeline().parameters.synapseDatabaseName",
+                "type": "Expression"
+              },
+              "deadLetterContainer": {
+                "value": "@pipeline().parameters.deadLetterContainer",
+                "type": "Expression"
+              }
+            }
+          },
+          "compute": {
+            "coreCount": 8,
+            "computeType": "General"
+          },
+          "traceLevel": "Fine",
+          "staging": {
+            "linkedService": {
+              "referenceName": "ls_synapse_staging_blob",
+              "type": "LinkedServiceReference"
+            },
+            "folderPath": {
+              "value": "@concat('staging/product_catalog/', pipeline().RunId)",
+              "type": "Expression"
+            }
+          }
+        }
+      },
+      {
+        "name": "UpdateWatermark",
+        "description": "Update the watermark table with the max _ts seen in this run, derived from the most recent valid_from timestamp in dim_product_scd2. Uses secureOutput to prevent token from appearing in monitoring logs.",
+        "type": "Script",
+        "dependsOn": [
+          {
+            "activity": "SCD2ProductCatalogDataFlow",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:05:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 90
+        },
+        "typeProperties": {
+          "linkedService": {
+            "referenceName": "ls_watermark_sql",
+            "type": "LinkedServiceReference"
+          },
+          "scripts": [
+            {
+              "type": "NonQuery",
+              "text": "MERGE etl.watermark AS target USING (SELECT 'incremental_cosmosdb_to_synapse_scd2' AS pipeline_name, @newWatermarkTs AS last_processed_ts, GETUTCDATE() AS last_updated) AS source ON target.pipeline_name = source.pipeline_name WHEN MATCHED THEN UPDATE SET target.last_processed_ts = source.last_processed_ts, target.last_updated = source.last_updated WHEN NOT MATCHED THEN INSERT (pipeline_name, last_processed_ts, last_updated) VALUES (source.pipeline_name, source.last_processed_ts, source.last_updated);"
+            }
+          ],
+          "scriptParameters": [
+            {
+              "name": "newWatermarkTs",
+              "value": {
+                "value": "@activity('SCD2ProductCatalogDataFlow').output.runStatus.metrics.SCD2ProductCatalogSink.maxProcessedTs",
+                "type": "Expression"
+              },
+              "type": "Int64"
+            }
+          ]
+        },
+        "secureOutput": true,
+        "secureInput": true
+      },
+      {
+        "name": "NotifyOnDataFlowFailure",
+        "description": "Send failure alert to the Logic App webhook when the SCD2 data flow fails after all retries.",
+        "type": "WebActivity",
+        "dependsOn": [
+          {
+            "activity": "SCD2ProductCatalogDataFlow",
+            "dependencyConditions": ["Failed"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:05:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 30
+        },
+        "typeProperties": {
+          "url": {
+            "value": "@pipeline().parameters.alertWebhookUrl",
+            "type": "Expression"
+          },
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": {
+            "value": "@concat('{\"pipelineName\":\"incremental_cosmosdb_to_synapse_scd2\",\"runId\":\"', pipeline().RunId, '\",\"failedActivity\":\"SCD2ProductCatalogDataFlow\",\"status\":\"Failed\",\"timestamp\":\"', utcnow(), '\"}')",
+            "type": "Expression"
+          }
+        }
+      },
+      {
+        "name": "NotifyOnWatermarkUpdateFailure",
+        "description": "Send failure alert to the Logic App webhook when the watermark update fails, which risks duplicate processing on the next run.",
+        "type": "WebActivity",
+        "dependsOn": [
+          {
+            "activity": "UpdateWatermark",
+            "dependencyConditions": ["Failed"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:05:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 30
+        },
+        "typeProperties": {
+          "url": {
+            "value": "@pipeline().parameters.alertWebhookUrl",
+            "type": "Expression"
+          },
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": {
+            "value": "@concat('{\"pipelineName\":\"incremental_cosmosdb_to_synapse_scd2\",\"runId\":\"', pipeline().RunId, '\",\"failedActivity\":\"UpdateWatermark\",\"status\":\"WatermarkUpdateFailed\",\"timestamp\":\"', utcnow(), '\"}')",
+            "type": "Expression"
+          }
+        }
+      },
+      {
+        "name": "NotifyOnLookupFailure",
+        "description": "Send failure alert to the Logic App webhook when the initial watermark lookup fails.",
+        "type": "WebActivity",
+        "dependsOn": [
+          {
+            "activity": "LookupWatermark",
+            "dependencyConditions": ["Failed"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:05:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 30
+        },
+        "typeProperties": {
+          "url": {
+            "value": "@pipeline().parameters.alertWebhookUrl",
+            "type": "Expression"
+          },
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": {
+            "value": "@concat('{\"pipelineName\":\"incremental_cosmosdb_to_synapse_scd2\",\"runId\":\"', pipeline().RunId, '\",\"failedActivity\":\"LookupWatermark\",\"status\":\"Failed\",\"timestamp\":\"', utcnow(), '\"}')",
+            "type": "Expression"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "cosmosDbAccountUri": {
+        "type": "String",
+        "defaultValue": "",
+        "description": "The URI of the Azure Cosmos DB account (e.g. https://<account>.documents.azure.com:443/). Do not hardcode — supply via linked service or pipeline parameter."
+      },
+      "cosmosDbDatabaseName": {
+        "type": "String",
+        "defaultValue": "ProductCatalogDB",
+        "description": "Cosmos DB database name containing the products container."
+      },
+      "synapseEndpoint": {
+        "type": "String",
+        "defaultValue": "",
+        "description": "Azure Synapse Analytics dedicated SQL pool server endpoint (e.g. <workspace>.sql.azuresynapse.net)."
+      },
+      "synapseDatabaseName": {
+        "type": "String",
+        "defaultValue": "",
+        "description": "The Synapse dedicated SQL pool database name where dim.dim_product_scd2 resides."
+      },
+      "alertWebhookUrl": {
+        "type": "SecureString",
+        "defaultValue": "",
+        "description": "Logic App HTTP trigger URL to receive pipeline failure notifications. Stored as SecureString to prevent logging."
+      },
+      "deadLetterContainer": {
+        "type": "String",
+        "defaultValue": "dead-letter/product-catalog/",
+        "description": "Blob Storage container path for dead-lettered malformed documents (missing product_id or categoryId)."
+      }
+    },
+    "variables": {
+      "runHasChanges": {
+        "type": "Boolean",
+        "defaultValue": false
+      }
+    },
+    "annotations": [
+      "product-catalog",
+      "scd2",
+      "incremental",
+      "auto-generated"
+    ],
+    "folder": {
+      "name": "Dimensions/ProductCatalog"
+    },
+    "concurrency": 1
+  }
+}
