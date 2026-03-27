@@ -1,0 +1,203 @@
+{
+  "name": "vendor_api_ingest_parent",
+  "properties": {
+    "description": "Metadata-driven parent pipeline: reads active vendor REST API configurations from config.api_endpoints, invokes child pipeline per vendor in parallel batches of 4, then merges all staging data into inventory.current_stock via stored procedure. Handles empty vendor lists gracefully. Overall pipeline timeout: 3 hours (enforced at trigger/run level).",
+    "activities": [
+      {
+        "name": "LookupActiveVendors",
+        "description": "Query config.api_endpoints for all active vendor configurations (is_active = 1). Returns vendor_id, api_url, auth_type, secret_name, response_root_path, and target_table.",
+        "type": "Lookup",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.00:05:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureInput": true,
+          "secureOutput": false
+        },
+        "typeProperties": {
+          "source": {
+            "type": "AzureSqlSource",
+            "sqlReaderQuery": "SELECT vendor_id, api_url, auth_type, secret_name, response_root_path, target_table FROM config.api_endpoints WHERE is_active = 1",
+            "queryTimeout": "00:02:00",
+            "partitionOption": "None"
+          },
+          "dataset": {
+            "referenceName": "ConfigApiEndpointsDataset",
+            "type": "DatasetReference",
+            "parameters": {
+              "configDbConnectionString": {
+                "value": "@pipeline().parameters.configDbConnectionString",
+                "type": "Expression"
+              }
+            }
+          },
+          "firstRowOnly": false
+        }
+      },
+      {
+        "name": "CheckHasActiveVendors",
+        "description": "Guard against empty config table. If no active vendors are found, the pipeline completes successfully via no-op Wait. If vendors exist, runs the parallel ForEach ingestion.",
+        "type": "IfCondition",
+        "dependsOn": [
+          {
+            "activity": "LookupActiveVendors",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "expression": {
+            "value": "@greater(length(activity('LookupActiveVendors').output.value), 0)",
+            "type": "Expression"
+          },
+          "ifTrueActivities": [
+            {
+              "name": "ForEachVendor",
+              "description": "Process each active vendor in parallel (batchCount: 4). Individual vendor failures do not stop other vendors from being processed — the ForEach batch continues.",
+              "type": "ForEach",
+              "dependsOn": [],
+              "typeProperties": {
+                "items": {
+                  "value": "@activity('LookupActiveVendors').output.value",
+                  "type": "Expression"
+                },
+                "isSequential": false,
+                "batchCount": 4,
+                "activities": [
+                  {
+                    "name": "ExecuteVendorChildPipeline",
+                    "description": "Invoke child pipeline for a single vendor. Passes all vendor config as parameters. Child pipeline handles auth, truncation, copy, and retry independently.",
+                    "type": "ExecutePipeline",
+                    "dependsOn": [],
+                    "policy": {
+                      "secureInput": false
+                    },
+                    "typeProperties": {
+                      "pipeline": {
+                        "referenceName": "vendor_api_ingest_child",
+                        "type": "PipelineReference"
+                      },
+                      "waitOnCompletion": true,
+                      "parameters": {
+                        "vendorId": {
+                          "value": "@item().vendor_id",
+                          "type": "Expression"
+                        },
+                        "apiUrl": {
+                          "value": "@item().api_url",
+                          "type": "Expression"
+                        },
+                        "authType": {
+                          "value": "@item().auth_type",
+                          "type": "Expression"
+                        },
+                        "secretName": {
+                          "value": "@item().secret_name",
+                          "type": "Expression"
+                        },
+                        "responseRootPath": {
+                          "value": "@item().response_root_path",
+                          "type": "Expression"
+                        },
+                        "targetTable": {
+                          "value": "@item().target_table",
+                          "type": "Expression"
+                        },
+                        "keyVaultBaseUrl": {
+                          "value": "@pipeline().parameters.keyVaultBaseUrl",
+                          "type": "Expression"
+                        },
+                        "managedInstanceFqdn": {
+                          "value": "@pipeline().parameters.managedInstanceFqdn",
+                          "type": "Expression"
+                        },
+                        "inventoryDbName": {
+                          "value": "@pipeline().parameters.inventoryDbName",
+                          "type": "Expression"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "ifFalseActivities": [
+            {
+              "name": "LogNoActiveVendors",
+              "description": "No active vendors found in config table — pipeline completes successfully without ingesting any data.",
+              "type": "Wait",
+              "dependsOn": [],
+              "typeProperties": {
+                "waitTimeInSeconds": 1
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "MergeVendorInventory",
+        "description": "Execute dbo.usp_merge_vendor_inventory on SQL Managed Instance to merge all vendor staging data into inventory.current_stock. Runs even if some vendors failed (partial merge of successfully loaded vendors). Timeout: 45 minutes to accommodate data growth.",
+        "type": "SqlServerStoredProcedure",
+        "dependsOn": [
+          {
+            "activity": "CheckHasActiveVendors",
+            "dependencyConditions": ["Succeeded", "Failed"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:45:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 60,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "linkedServiceName": {
+          "referenceName": "AzureSqlManagedInstanceLinkedService",
+          "type": "LinkedServiceReference",
+          "parameters": {
+            "managedInstanceFqdn": {
+              "value": "@pipeline().parameters.managedInstanceFqdn",
+              "type": "Expression"
+            },
+            "inventoryDbName": {
+              "value": "@pipeline().parameters.inventoryDbName",
+              "type": "Expression"
+            }
+          }
+        },
+        "typeProperties": {
+          "storedProcedureName": "[dbo].[usp_merge_vendor_inventory]"
+        }
+      }
+    ],
+    "parameters": {
+      "configDbConnectionString": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "keyVaultBaseUrl": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "managedInstanceFqdn": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "inventoryDbName": {
+        "type": "String",
+        "defaultValue": "InventoryDB"
+      }
+    },
+    "annotations": [
+      "vendor-inventory",
+      "rest-api",
+      "parent-child",
+      "metadata-driven",
+      "auto-generated"
+    ],
+    "folder": {
+      "name": "Ingestion/VendorFeeds"
+    }
+  }
+}
